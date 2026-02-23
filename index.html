@@ -1,1 +1,378 @@
-
+local Players=game:GetService("Players")
+local TweenService=game:GetService("TweenService")
+local UserInputService=game:GetService("UserInputService")
+local RunService=game:GetService("RunService")
+local player=Players.LocalPlayer
+local playerGui=player:WaitForChild("PlayerGui")
+local screenGui=Instance.new("ScreenGui")
+screenGui.Name="LoaderAnimation"
+screenGui.ResetOnSpawn=false
+screenGui.IgnoreGuiInset=true
+screenGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+screenGui.Parent=playerGui
+local stage=Instance.new("Frame")
+stage.Size=UDim2.fromScale(1,1)
+stage.BackgroundTransparency=1
+stage.BorderSizePixel=0
+stage.ZIndex=1
+stage.Parent=screenGui
+local PANEL_ASPECT=375/(225*2+8)
+local panel=Instance.new("Frame")
+panel.Name="Panel"
+panel.AnchorPoint=Vector2.new(0.5,0.5)
+panel.Position=UDim2.fromScale(0.5,0.5)
+panel.Size=UDim2.fromScale(0,0.6)
+panel.BackgroundTransparency=1
+panel.BorderSizePixel=0
+panel.ZIndex=1
+panel.Parent=stage
+local panelAspect=Instance.new("UIAspectRatioConstraint")
+panelAspect.AspectRatio=PANEL_ASPECT
+panelAspect.DominantAxis=Enum.DominantAxis.Height
+panelAspect.AspectType=Enum.AspectType.ScaleWithParentSize
+panelAspect.Parent=panel
+local WHITE=Color3.fromRGB(242,242,242)
+local DARK=Color3.fromRGB(31,31,31)
+local RED=Color3.fromRGB(255,80,80)
+local PW=1.0
+local BOX_W=0.96
+local ROD_H=0.016
+local SLIDE_Y=0.45
+local CLONE_Y=0.15
+local TITLE_H=CLONE_Y-ROD_H
+local BOX_H=SLIDE_Y*2+ROD_H
+local dragOffsetX=0
+local dragOffsetY=0
+local dragging=false
+local dragStart=nil
+local oxAtStart,oyAtStart=0,0
+local state="hidden"
+local flyEnabled=false
+local flyConn=nil
+local flySpeed=50
+local function makeBar(name,sw,sh,color,zi)
+	local f=Instance.new("Frame")
+	f.Name=name
+	f.AnchorPoint=Vector2.new(0.5,0.5)
+	f.Size=UDim2.fromScale(sw,sh)
+	f.Position=UDim2.fromScale(0.5,0.5)
+	f.BackgroundColor3=color
+	f.BorderSizePixel=0
+	f.ZIndex=zi
+	f.Visible=false
+	f.Parent=panel
+	return f
+end
+local box=Instance.new("Frame")
+box.Name="Box"
+box.AnchorPoint=Vector2.new(0.5,0.5)
+box.Size=UDim2.fromScale(BOX_W,0)
+box.Position=UDim2.fromScale(0.5,0.5)
+box.BackgroundColor3=DARK
+box.BorderSizePixel=0
+box.ZIndex=2
+box.Visible=false
+box.Parent=panel
+local rodTop=makeBar("RodTop",0.002,ROD_H,WHITE,3)
+local rodBot=makeBar("RodBot",0.002,ROD_H,WHITE,3)
+local rodClone=makeBar("RodClone",BOX_W,ROD_H,WHITE,3)
+local function rtp() return UDim2.fromScale(0.5,0.5+(-SLIDE_Y)-ROD_H/2) end
+local function rbp() return UDim2.fromScale(0.5,0.5+(SLIDE_Y)-ROD_H/2) end
+local function rcp() return UDim2.fromScale(0.5,0.5-ROD_H/2) end
+local function bxp() return UDim2.fromScale(0.5,0.5) end
+local function clp() return UDim2.fromScale(0.5,0.5-SLIDE_Y-ROD_H/2+CLONE_Y) end
+local function tip() return UDim2.fromScale(0.5,0.5-SLIDE_Y+ROD_H/2) end
+local titleClip=Instance.new("Frame")
+titleClip.Name="TitleClip"
+titleClip.AnchorPoint=Vector2.new(0.5,0)
+titleClip.BackgroundTransparency=1
+titleClip.BorderSizePixel=0
+titleClip.ClipsDescendants=true
+titleClip.ZIndex=4
+titleClip.Size=UDim2.fromScale(BOX_W,0)
+titleClip.Position=tip()
+titleClip.Visible=false
+titleClip.Parent=panel
+local titleLabel=Instance.new("TextLabel")
+titleLabel.Size=UDim2.fromScale(1,1)
+titleLabel.BackgroundTransparency=1
+titleLabel.Text="Demon Panel"
+titleLabel.TextColor3=WHITE
+titleLabel.Font=Enum.Font.Sarpanch
+titleLabel.TextScaled=true
+titleLabel.ZIndex=4
+titleLabel.Parent=titleClip
+local BUTTON_NAMES={"Fly","","","","",""}
+local COLS,ROWS=2,3
+local BTN_AREA_TOP=-SLIDE_Y+CLONE_Y+ROD_H
+local BTN_AREA_H=SLIDE_Y-ROD_H-BTN_AREA_TOP
+local PAD_X=0.02
+local PAD_Y=BTN_AREA_H*0.06
+local BTN_W=(BOX_W-PAD_X*(COLS+1))/COLS
+local BTN_H=(BTN_AREA_H-PAD_Y*(ROWS+1))/ROWS
+local buttons={}
+local buttonStrokes={}
+local function buttonPos(i)
+	local col=(i-1)%COLS
+	local row=math.floor((i-1)/COLS)
+	local sx=0.5-BOX_W/2+PAD_X+col*(BTN_W+PAD_X)
+	local sy=0.5+BTN_AREA_TOP+PAD_Y+row*(BTN_H+PAD_Y)
+	return sx,sy
+end
+local function enableFly()
+	flyEnabled=true
+	local char=player.Character
+	if not char then return end
+	local hrp=char:FindFirstChild("HumanoidRootPart")
+	local hum=char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not hum then return end
+	hum.PlatformStand=true
+	local bg=Instance.new("BodyGyro")
+	bg.MaxTorque=Vector3.new(1e5,1e5,1e5)
+	bg.P=1e4
+	bg.CFrame=hrp.CFrame
+	bg.Parent=hrp
+	local bv=Instance.new("BodyVelocity")
+	bv.MaxForce=Vector3.new(1e5,1e5,1e5)
+	bv.Velocity=Vector3.zero
+	bv.Parent=hrp
+	flyConn=RunService.RenderStepped:Connect(function()
+		if not flyEnabled then
+			bg:Destroy()
+			bv:Destroy()
+			hum.PlatformStand=false
+			flyConn:Disconnect()
+			flyConn=nil
+			return
+		end
+		local cam=workspace.CurrentCamera
+		local vel=Vector3.zero
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then vel=vel+cam.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then vel=vel-cam.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then vel=vel-cam.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then vel=vel+cam.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then vel=vel+Vector3.new(0,1,0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then vel=vel-Vector3.new(0,1,0) end
+		bv.Velocity=vel*flySpeed
+		bg.CFrame=cam.CFrame
+	end)
+end
+local function disableFly()
+	flyEnabled=false
+end
+for i,name in ipairs(BUTTON_NAMES) do
+	local btn=Instance.new("TextButton")
+	btn.Name=name~=""and name or("Button"..i)
+	btn.AnchorPoint=Vector2.new(0,0)
+	btn.Size=UDim2.fromScale(BTN_W,BTN_H)
+	local sx,sy=buttonPos(i)
+	btn.Position=UDim2.fromScale(sx,sy)
+	btn.BackgroundTransparency=1
+	btn.BorderSizePixel=0
+	btn.Text=name
+	btn.TextColor3=WHITE
+	btn.Font=Enum.Font.Sarpanch
+	btn.TextScaled=true
+	btn.ZIndex=11
+	btn.Visible=false
+	btn.Parent=panel
+	local bg=Instance.new("Frame")
+	bg.Size=UDim2.fromScale(1,1)
+	bg.BackgroundTransparency=1
+	bg.BorderSizePixel=0
+	bg.ZIndex=10
+	bg.Parent=btn
+	local stroke=Instance.new("UIStroke",bg)
+	stroke.Color=WHITE
+	buttonStrokes[i]=stroke
+	if name=="Fly" then
+		local flyStroke=stroke
+		local flyBtn=btn
+		btn.MouseButton1Click:Connect(function()
+			if flyEnabled then
+				disableFly()
+				flyBtn.TextColor3=WHITE
+				flyStroke.Color=WHITE
+			else
+				enableFly()
+				flyBtn.TextColor3=RED
+				flyStroke.Color=RED
+			end
+		end)
+	end
+	buttons[i]=btn
+end
+local function popButtonsIn()
+	local pairs2={{1,2},{3,4},{5,6}}
+	local finalW=BTN_W
+	local finalH=BTN_H
+	for _,pair in ipairs(pairs2) do
+		task.spawn(function()
+			local ti=TweenInfo.new(0.25,Enum.EasingStyle.Back,Enum.EasingDirection.Out)
+			for _,idx in ipairs(pair) do
+				if buttons[idx] then
+					local sx,sy=buttonPos(idx)
+					local cx=sx+finalW/2
+					local cy=sy+finalH/2
+					buttons[idx].AnchorPoint=Vector2.new(0.5,0.5)
+					buttons[idx].Size=UDim2.fromScale(0,0)
+					buttons[idx].Position=UDim2.fromScale(cx,cy)
+					buttons[idx].Visible=true
+					TweenService:Create(buttons[idx],ti,{
+						Size=UDim2.fromScale(finalW,finalH),
+						Position=UDim2.fromScale(cx,cy)
+					}):Play()
+				end
+			end
+		end)
+		task.wait(0.15)
+	end
+end
+local function hideButtons()
+	for _,b in ipairs(buttons) do
+		b.Visible=false
+		b.AnchorPoint=Vector2.new(0,0)
+		local sx,sy=buttonPos(_)
+		b.Size=UDim2.fromScale(BTN_W,BTN_H)
+		b.Position=UDim2.fromScale(sx,sy)
+	end
+end
+local function setPanelPos()
+	panel.Position=UDim2.fromScale(0.5+dragOffsetX,0.5+dragOffsetY)
+end
+local function resetAll()
+	rodTop.Visible=false;rodBot.Visible=false
+	rodClone.Visible=false;titleClip.Visible=false;box.Visible=false
+	hideButtons()
+	rodTop.Size=UDim2.fromScale(0.002,ROD_H);rodTop.Position=rcp()
+	rodBot.Size=UDim2.fromScale(0.002,ROD_H);rodBot.Position=rcp()
+	rodClone.Size=UDim2.fromScale(BOX_W,ROD_H)
+	titleClip.Size=UDim2.fromScale(BOX_W,0);titleClip.Position=tip()
+	box.Size=UDim2.fromScale(BOX_W,0);box.Position=bxp()
+end
+local function phase3Forward()
+	rodClone.Size=UDim2.fromScale(BOX_W,ROD_H)
+	rodClone.Position=rtp()
+	rodClone.Visible=true
+	titleClip.Size=UDim2.fromScale(BOX_W,0)
+	titleClip.Position=tip()
+	titleClip.Visible=true
+	local ti=TweenInfo.new(0.4,Enum.EasingStyle.Cubic,Enum.EasingDirection.Out)
+	local tc=TweenService:Create(rodClone,ti,{Position=clp()})
+	TweenService:Create(titleClip,ti,{Size=UDim2.fromScale(BOX_W,TITLE_H)}):Play()
+	tc:Play()
+	tc.Completed:Connect(function()
+		if state=="animating" then
+			state="open"
+			popButtonsIn()
+		end
+	end)
+end
+local function phase2Forward()
+	box.Size=UDim2.fromScale(BOX_W,0);box.Position=bxp();box.Visible=true
+	local ti=TweenInfo.new(0.7,Enum.EasingStyle.Cubic,Enum.EasingDirection.Out)
+	TweenService:Create(rodTop,ti,{Position=rtp()}):Play()
+	TweenService:Create(rodBot,ti,{Position=rbp()}):Play()
+	local tb=TweenService:Create(box,ti,{Size=UDim2.fromScale(BOX_W,BOX_H),Position=bxp()})
+	tb:Play()
+	tb.Completed:Connect(function()
+		if state=="animating" then phase3Forward() end
+	end)
+end
+local function phase1Forward()
+	rodTop.Visible=true;rodBot.Visible=true
+	rodTop.Size=UDim2.fromScale(0.002,ROD_H);rodTop.Position=rcp()
+	rodBot.Size=UDim2.fromScale(0.002,ROD_H);rodBot.Position=rcp()
+	local ti=TweenInfo.new(0.6,Enum.EasingStyle.Exponential,Enum.EasingDirection.Out)
+	local tt=TweenService:Create(rodTop,ti,{Size=UDim2.fromScale(PW,ROD_H),Position=rcp()})
+	TweenService:Create(rodBot,ti,{Size=UDim2.fromScale(PW,ROD_H),Position=rcp()}):Play()
+	tt:Play()
+	tt.Completed:Connect(function()
+		if state=="animating" then phase2Forward() end
+	end)
+end
+local function phase2Reverse()
+	box.Visible=false;rodClone.Visible=false;titleClip.Visible=false
+	local ti=TweenInfo.new(0.6,Enum.EasingStyle.Exponential,Enum.EasingDirection.In)
+	local tt=TweenService:Create(rodTop,ti,{Size=UDim2.fromScale(0.002,ROD_H),Position=rcp()})
+	TweenService:Create(rodBot,ti,{Size=UDim2.fromScale(0.002,ROD_H),Position=rcp()}):Play()
+	tt:Play()
+	tt.Completed:Connect(function()
+		if state=="reversing" then
+			rodTop.Visible=false;rodBot.Visible=false;state="hidden"
+		end
+	end)
+end
+local function phase1Reverse()
+	hideButtons()
+	local ti=TweenInfo.new(0.3,Enum.EasingStyle.Cubic,Enum.EasingDirection.In)
+	TweenService:Create(titleClip,ti,{Size=UDim2.fromScale(BOX_W,0)}):Play()
+	local tc=TweenService:Create(rodClone,ti,{Position=rtp()})
+	tc:Play()
+	tc.Completed:Connect(function()
+		if state~="reversing" then return end
+		titleClip.Visible=false;rodClone.Visible=false
+		local ti2=TweenInfo.new(0.7,Enum.EasingStyle.Cubic,Enum.EasingDirection.In)
+		TweenService:Create(rodTop,ti2,{Position=rcp()}):Play()
+		TweenService:Create(box,ti2,{Size=UDim2.fromScale(BOX_W,0),Position=bxp()}):Play()
+		local tb=TweenService:Create(rodBot,ti2,{Position=rcp()})
+		tb:Play()
+		tb.Completed:Connect(function()
+			if state=="reversing" then phase2Reverse() end
+		end)
+	end)
+end
+local hitBox=Instance.new("TextButton")
+hitBox.Name="HitBox"
+hitBox.AnchorPoint=Vector2.new(0.5,0.5)
+hitBox.Size=UDim2.fromScale(1,1)
+hitBox.Position=UDim2.fromScale(0.5,0.5)
+hitBox.BackgroundTransparency=1
+hitBox.Text=""
+hitBox.ZIndex=9
+hitBox.Visible=false
+hitBox.Parent=panel
+hitBox.InputBegan:Connect(function(input)
+	if state~="open" then return end
+	if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+		dragging=true
+		dragStart=input.Position
+		oxAtStart=dragOffsetX;oyAtStart=dragOffsetY
+	end
+end)
+hitBox.InputEnded:Connect(function(input)
+	if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+		dragging=false
+	end
+end)
+UserInputService.InputChanged:Connect(function(input)
+	if not dragging then return end
+	if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then
+		local s=stage.AbsoluteSize
+		local d=input.Position-dragStart
+		dragOffsetX=oxAtStart+d.X/s.X
+		dragOffsetY=oyAtStart+d.Y/s.Y
+		setPanelPos()
+	end
+end)
+task.spawn(function()
+	while true do
+		task.wait(0.05)
+		hitBox.Visible=state=="open"
+	end
+end)
+UserInputService.InputBegan:Connect(function(input,gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode~=Enum.KeyCode.E then return end
+	if state=="animating" or state=="reversing" then return end
+	if state=="hidden" then
+		resetAll()
+		state="animating"
+		task.wait(0.05)
+		phase1Forward()
+	elseif state=="open" then
+		state="reversing"
+		hitBox.Visible=false
+		phase1Reverse()
+	end
+end)
