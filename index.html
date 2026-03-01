@@ -1,705 +1,434 @@
--- ╔══════════════════════════════════════════════╗
--- ║           CONFIG PANEL  •  v2.0              ║
--- ║  Aimlock | ESP | AimKey | SafeSwitch | Mode  ║
--- ╚══════════════════════════════════════════════╝
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Camera = workspace.CurrentCamera
+local LP = Players.LocalPlayer
 
-local Players           = game:GetService("Players")
-local RunService        = game:GetService("RunService")
-local UserInputService  = game:GetService("UserInputService")
-local TweenService      = game:GetService("TweenService")
-local Workspace         = game:GetService("Workspace")
-local Camera            = Workspace.CurrentCamera
-local LocalPlayer       = Players.LocalPlayer
-
--- ─────────────────────────────────────────────
---  STATE
--- ─────────────────────────────────────────────
-local State = {
-    aimlockOn = false,
-    espOn     = false,
-    safeOn    = false,
-    safeKey   = nil,   -- KeyCode for SafeSwitch toggle
-    aimKey    = nil,   -- KeyCode to hold for aimlock activation
-    mode      = "Silent",
-    modeSettings = {
-        Silent     = { fov = 40,  smooth = 0.08, prediction = 0.05 },
-        Moderate   = { fov = 80,  smooth = 0.14, prediction = 0.10 },
-        Aggressive = { fov = 160, smooth = 0.22, prediction = 0.16 },
-        Legit      = { fov = 20,  smooth = 0.05, prediction = 0.03 },
-        Rage       = { fov = 360, smooth = 0.35, prediction = 0.22 },
-    },
+local S = {
+	aimlock = false,
+	esp = false,
+	safe = false,
+	safeKey = nil,
+	mode = "Silent",
+	modes = {
+		Silent     = {fov=40,  smooth=0.08, pred=0.05},
+		Moderate   = {fov=80,  smooth=0.14, pred=0.10},
+		Aggressive = {fov=160, smooth=0.22, pred=0.16},
+		Legit      = {fov=20,  smooth=0.05, pred=0.03},
+		Rage       = {fov=360, smooth=0.35, pred=0.22},
+	},
+	modeColors = {
+		Silent="#3a3a44", Moderate="#72afe8", Aggressive="#f5b942",
+		Legit="#4ade80",  Rage="#e07070",
+	},
 }
 
-local MODE_COLORS = {
-    Silent     = "#3a3a44",
-    Moderate   = "#72afe8",
-    Aggressive = "#f5b942",
-    Legit      = "#4ade80",
-    Rage       = "#e07070",
-}
-
--- ─────────────────────────────────────────────
---  HELPERS
--- ─────────────────────────────────────────────
-local function tw(obj, props, t, style, dir)
-    TweenService:Create(obj, TweenInfo.new(
-        t or 0.18,
-        style or Enum.EasingStyle.Quad,
-        dir   or Enum.EasingDirection.Out
-    ), props):Play()
+local function tw(o, p, t, s, d)
+	TweenService:Create(o, TweenInfo.new(t or 0.18, s or Enum.EasingStyle.Quad, d or Enum.EasingDirection.Out), p):Play()
 end
+local function hex(h) return Color3.fromHex(h) end
 
-local function c3(hex) return Color3.fromHex(hex) end
+local espFolder = Instance.new("Folder", workspace)
+espFolder.Name = "_ESP"
+local espObjs = {}
 
--- ─────────────────────────────────────────────
---  AIMLOCK
--- ─────────────────────────────────────────────
-local function getNearestTarget()
-    local cfg    = State.modeSettings[State.mode]
-    local best, bestDist = nil, cfg.fov
-    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer then continue end
-        local char = plr.Character
-        if not char then continue end
-        local hum  = char:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health <= 0 then continue end
-        local head = char:FindFirstChild("Head")
-        if not head then continue end
-        local sp, vis = Camera:WorldToViewportPoint(head.Position)
-        if not vis then continue end
-        local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-        if d < bestDist then bestDist = d; best = head end
-    end
-    return best
+local function fovCircle()
+	local d = Drawing.new("Circle")
+	d.Visible = false; d.Color = Color3.new(1,1,1); d.Thickness = 1
+	d.Filled = false; d.NumSides = 64
+	return d
 end
+local FOVCircle = fovCircle()
 
-local function isAimKeyHeld()
-    if not State.aimKey then
-        -- default: right mouse button
-        return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
-    end
-    return UserInputService:IsKeyDown(State.aimKey)
+local function getNearTarget()
+	local cfg = S.modes[S.mode]
+	local best, bestD = nil, cfg.fov
+	local cx, cy = Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p == LP then continue end
+		local c = p.Character
+		local h = c and c:FindFirstChild("Head")
+		local hum = c and c:FindFirstChildOfClass("Humanoid")
+		if not h or not hum or hum.Health <= 0 then continue end
+		local sp, vis = Camera:WorldToViewportPoint(h.Position)
+		if not vis then continue end
+		local d = Vector2.new(sp.X - cx, sp.Y - cy).Magnitude
+		if d < bestD then bestD = d; best = h end
+	end
+	return best
 end
 
 local function doAimlock()
-    if not State.aimlockOn or State.safeOn then return end
-    if not isAimKeyHeld() then return end
-    local target = getNearestTarget()
-    if not target then return end
-    local cfg = State.modeSettings[State.mode]
-    local vel = Vector3.zero
-    local hrp = target.Parent and target.Parent:FindFirstChild("HumanoidRootPart")
-    if hrp then vel = hrp.AssemblyLinearVelocity end
-    local predicted = target.Position + vel * cfg.prediction
-    local _, vis    = Camera:WorldToViewportPoint(predicted)
-    if not vis then return end
-    local targetCF = CFrame.new(Camera.CFrame.Position, predicted)
-    Camera.CFrame  = Camera.CFrame:Lerp(targetCF, cfg.smooth)
+	if not S.aimlock or S.safe then return end
+	if not UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
+	local t = getNearTarget()
+	if not t then return end
+	local cfg = S.modes[S.mode]
+	local hrp = t.Parent and t.Parent:FindFirstChild("HumanoidRootPart")
+	local vel = (hrp and hrp:IsA("BasePart")) and hrp.AssemblyLinearVelocity or Vector3.zero
+	local pred = t.Position + vel * cfg.pred
+	local _, vis = Camera:WorldToViewportPoint(pred)
+	if not vis then return end
+	Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, pred), cfg.smooth)
 end
 
--- ─────────────────────────────────────────────
---  ESP
--- ─────────────────────────────────────────────
-local espFolder  = Instance.new("Folder")
-espFolder.Name   = "_ESP"
-espFolder.Parent = Workspace
-local espObjects = {}
-
-local function createESPFor(plr)
-    if espObjects[plr] then return end
-    local bill = Instance.new("BillboardGui")
-    bill.Name        = "ESP_"..plr.Name
-    bill.AlwaysOnTop = true
-    bill.Size        = UDim2.new(0, 60, 0, 80)
-    bill.StudsOffset = Vector3.new(0, 3, 0)
-    bill.Parent      = espFolder
-
-    local box = Instance.new("Frame", bill)
-    box.Size = UDim2.new(1,0,1,0)
-    box.BackgroundTransparency = 1
-    box.BorderSizePixel = 0
-    local stroke = Instance.new("UIStroke", box)
-    stroke.Thickness = 1.5
-    stroke.Color = c3(MODE_COLORS[State.mode])
-
-    local nameL = Instance.new("TextLabel", bill)
-    nameL.Size = UDim2.new(1,0,0,14)
-    nameL.Position = UDim2.new(0,0,-0.25,0)
-    nameL.BackgroundTransparency = 1
-    nameL.TextColor3 = Color3.new(1,1,1)
-    nameL.TextSize = 11
-    nameL.Font = Enum.Font.GothamBold
-    nameL.Text = plr.Name
-
-    local hbBG = Instance.new("Frame", bill)
-    hbBG.Size = UDim2.new(0,4,1,0)
-    hbBG.Position = UDim2.new(-0.15,0,0,0)
-    hbBG.BackgroundColor3 = c3("#222226")
-    hbBG.BorderSizePixel = 0
-
-    local hbar = Instance.new("Frame", hbBG)
-    hbar.Name = "Bar"
-    hbar.Size = UDim2.new(1,0,1,0)
-    hbar.BackgroundColor3 = c3("#4ade80")
-    hbar.BorderSizePixel = 0
-
-    espObjects[plr] = { bill = bill, stroke = stroke, hbar = hbar }
+local function updateFOV()
+	local cfg = S.modes[S.mode]
+	local show = S.aimlock and not S.safe
+	FOVCircle.Visible = show
+	if show then
+		FOVCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+		FOVCircle.Radius = cfg.fov
+	end
 end
 
-local function removeESPFor(plr)
-    local e = espObjects[plr]
-    if e then e.bill:Destroy(); espObjects[plr] = nil end
+local function makeESP(p)
+	if espObjs[p] then return end
+	local bill = Instance.new("BillboardGui", espFolder)
+	bill.AlwaysOnTop = true; bill.Size = UDim2.new(0,60,0,80); bill.StudsOffset = Vector3.new(0,3,0)
+	local box = Instance.new("Frame", bill)
+	box.Size = UDim2.new(1,0,1,0); box.BackgroundTransparency = 1; box.BorderSizePixel = 0
+	local stroke = Instance.new("UIStroke", box)
+	stroke.Thickness = 1.5; stroke.Color = hex(S.modeColors[S.mode])
+	local nameL = Instance.new("TextLabel", bill)
+	nameL.Size = UDim2.new(1,0,0,14); nameL.Position = UDim2.new(0,0,-0.25,0)
+	nameL.BackgroundTransparency = 1; nameL.TextColor3 = Color3.new(1,1,1)
+	nameL.TextSize = 11; nameL.Font = Enum.Font.GothamBold; nameL.Text = p.Name
+	local hbg = Instance.new("Frame", bill)
+	hbg.Size = UDim2.new(0,4,1,0); hbg.Position = UDim2.new(-0.15,0,0,0)
+	hbg.BackgroundColor3 = hex("#222226"); hbg.BorderSizePixel = 0
+	local hbar = Instance.new("Frame", hbg)
+	hbar.Name = "Bar"; hbar.BackgroundColor3 = hex("#4ade80"); hbar.BorderSizePixel = 0
+	espObjs[p] = {bill=bill, stroke=stroke, hbar=hbar}
+end
+
+local function removeESP(p)
+	if espObjs[p] then espObjs[p].bill:Destroy(); espObjs[p] = nil end
 end
 
 local function updateESP()
-    if not State.espOn or State.safeOn then
-        for plr in pairs(espObjects) do removeESPFor(plr) end
-        return
-    end
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer then continue end
-        local char = plr.Character
-        local hum  = char and char:FindFirstChildOfClass("Humanoid")
-        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-        if char and hrp and hum and hum.Health > 0 then
-            createESPFor(plr)
-            local e = espObjects[plr]
-            if not e then continue end
-            e.bill.Adornee = hrp
-            e.bill.Enabled = true
-            e.stroke.Color = c3(MODE_COLORS[State.mode])
-            local pct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
-            e.hbar.Size = UDim2.new(1,0,pct,0)
-            e.hbar.Position = UDim2.new(0,0,1-pct,0)
-            e.hbar.BackgroundColor3 = Color3.new(1-pct, pct*0.85, 0.2)
-        else
-            removeESPFor(plr)
-        end
-    end
-    for plr in pairs(espObjects) do
-        if not plr.Parent then removeESPFor(plr) end
-    end
+	if not S.esp or S.safe then
+		for p in pairs(espObjs) do removeESP(p) end
+		return
+	end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p == LP then continue end
+		local c = p.Character
+		local hum = c and c:FindFirstChildOfClass("Humanoid")
+		local hrp = c and c:FindFirstChild("HumanoidRootPart")
+		if hrp and hum and hum.Health > 0 then
+			makeESP(p)
+			local e = espObjs[p]
+			if e then
+				e.bill.Adornee = hrp; e.bill.Enabled = true
+				e.stroke.Color = hex(S.modeColors[S.mode])
+				local pct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+				e.hbar.Size = UDim2.new(1,0,pct,0); e.hbar.Position = UDim2.new(0,0,1-pct,0)
+				e.hbar.BackgroundColor3 = Color3.new(1-pct, pct*0.85, 0.2)
+			end
+		else
+			removeESP(p)
+		end
+	end
+	for p in pairs(espObjs) do if not p.Parent then removeESP(p) end end
 end
 
--- ─────────────────────────────────────────────
---  SCREENGUI
--- ─────────────────────────────────────────────
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name           = "ConfigPanel"
-ScreenGui.ResetOnSpawn   = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent         = LocalPlayer:WaitForChild("PlayerGui")
+local SG = Instance.new("ScreenGui", LP:WaitForChild("PlayerGui"))
+SG.Name = "Panel"; SG.ResetOnSpawn = false; SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- ─────────────────────────────────────────────
---  FOV CIRCLE  — 75×75 base, transparent bg,
---               UICorner(1,0), UIStroke outline
--- ─────────────────────────────────────────────
-local fovCircle = Instance.new("Frame", ScreenGui)
-fovCircle.Name                   = "FOVCircle"
-fovCircle.AnchorPoint            = Vector2.new(0.5, 0.5)
-fovCircle.Position               = UDim2.new(0.5, 0, 0.5, 0)
-fovCircle.Size                   = UDim2.new(0, 75, 0, 75)
-fovCircle.BackgroundTransparency = 1   -- fully transparent fill
-fovCircle.BorderSizePixel        = 0
-fovCircle.ZIndex                 = 5
-fovCircle.Visible                = false
+local Panel = Instance.new("Frame", SG)
+Panel.Size = UDim2.new(0,260,0,0); Panel.Position = UDim2.new(0.5,-130,0.5,-150)
+Panel.BackgroundColor3 = hex("#111113"); Panel.BorderSizePixel = 0
+Panel.AutomaticSize = Enum.AutomaticSize.Y; Panel.ClipsDescendants = true
+Instance.new("UICorner", Panel).CornerRadius = UDim.new(0,14)
+local ps = Instance.new("UIStroke", Panel); ps.Color = hex("#222226"); ps.Thickness = 1
+local pp = Instance.new("UIPadding", Panel)
+pp.PaddingTop = UDim.new(0,16); pp.PaddingBottom = UDim.new(0,16)
+pp.PaddingLeft = UDim.new(0,16); pp.PaddingRight = UDim.new(0,16)
+local pl = Instance.new("UIListLayout", Panel)
+pl.SortOrder = Enum.SortOrder.LayoutOrder; pl.Padding = UDim.new(0,7)
+pl.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
-Instance.new("UICorner", fovCircle).CornerRadius = UDim.new(1, 0)  -- perfect circle
-
-local fovStroke = Instance.new("UIStroke", fovCircle)
-fovStroke.Thickness    = 1.5
-fovStroke.Color        = c3("#4ade80")
-fovStroke.Transparency = 0.35
-
--- ─────────────────────────────────────────────
---  PANEL
--- ─────────────────────────────────────────────
-local Panel = Instance.new("Frame", ScreenGui)
-Panel.Name              = "Panel"
-Panel.Size              = UDim2.new(0, 300, 0, 0)
-Panel.Position          = UDim2.new(0.5, -150, 0.5, -260)
-Panel.BackgroundColor3  = c3("#111113")
-Panel.BorderSizePixel   = 0
-Panel.AutomaticSize     = Enum.AutomaticSize.Y
-Panel.ClipsDescendants  = false
-
-Instance.new("UIStroke", Panel).Color     = c3("#222226")
-Instance.new("UIStroke", Panel).Thickness = 1
-Instance.new("UICorner", Panel).CornerRadius = UDim.new(0, 14)
-
-local pad = Instance.new("UIPadding", Panel)
-pad.PaddingTop    = UDim.new(0, 18)
-pad.PaddingBottom = UDim.new(0, 18)
-pad.PaddingLeft   = UDim.new(0, 18)
-pad.PaddingRight  = UDim.new(0, 18)
-
-local ll = Instance.new("UIListLayout", Panel)
-ll.SortOrder           = Enum.SortOrder.LayoutOrder
-ll.Padding             = UDim.new(0, 8)
-ll.FillDirection       = Enum.FillDirection.Vertical
-ll.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
--- util: simple row frame
-local function makeRow(order, h)
-    local f = Instance.new("Frame", Panel)
-    f.Size             = UDim2.new(1, 0, 0, h or 44)
-    f.BackgroundColor3 = c3("#161618")
-    f.BorderSizePixel  = 0
-    f.LayoutOrder      = order
-    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 9)
-    local s = Instance.new("UIStroke", f)
-    s.Color = c3("#202024"); s.Thickness = 1
-    return f, s
+local function row(order, h)
+	local f = Instance.new("Frame", Panel)
+	f.Size = UDim2.new(1,0,0,h or 40); f.BackgroundColor3 = hex("#161618")
+	f.BorderSizePixel = 0; f.LayoutOrder = order; f.ClipsDescendants = false
+	Instance.new("UICorner", f).CornerRadius = UDim.new(0,9)
+	local s = Instance.new("UIStroke", f); s.Color = hex("#202024"); s.Thickness = 1
+	return f, s
 end
 
-local function makeDivider(order)
-    local d = Instance.new("Frame", Panel)
-    d.Size             = UDim2.new(1, 0, 0, 1)
-    d.BackgroundColor3 = c3("#1a1a1e")
-    d.BorderSizePixel  = 0
-    d.LayoutOrder      = order
+local function div(order)
+	local d = Instance.new("Frame", Panel)
+	d.Size = UDim2.new(1,0,0,1); d.BackgroundColor3 = hex("#1a1a1e")
+	d.BorderSizePixel = 0; d.LayoutOrder = order
 end
 
--- ── Header (also drag handle) ──
 local header = Instance.new("Frame", Panel)
-header.Size                   = UDim2.new(1, 0, 0, 28)
-header.BackgroundTransparency = 1
-header.LayoutOrder            = 0
-
-local titleL = Instance.new("TextLabel", header)
-titleL.Text              = "CONFIG"
-titleL.TextSize          = 10
-titleL.Font              = Enum.Font.GothamBold
-titleL.TextColor3        = c3("#45454e")
-titleL.BackgroundTransparency = 1
-titleL.Size              = UDim2.new(1, -14, 1, 0)
-titleL.TextXAlignment    = Enum.TextXAlignment.Left
-titleL.TextYAlignment    = Enum.TextYAlignment.Center
-
-local statusDot = Instance.new("Frame", header)
-statusDot.Size             = UDim2.new(0, 6, 0, 6)
-statusDot.Position         = UDim2.new(1, -6, 0.5, -3)
-statusDot.BackgroundColor3 = c3("#2a2a30")
-statusDot.BorderSizePixel  = 0
-Instance.new("UICorner", statusDot).CornerRadius = UDim.new(1, 0)
-
-makeDivider(1)
+header.Size = UDim2.new(1,0,0,28); header.BackgroundTransparency = 1; header.LayoutOrder = 0
+local htitle = Instance.new("TextLabel", header)
+htitle.Text = "CONFIG"; htitle.TextSize = 9; htitle.Font = Enum.Font.GothamBold
+htitle.TextColor3 = hex("#45454e"); htitle.BackgroundTransparency = 1
+htitle.Size = UDim2.new(1,-12,1,0); htitle.TextXAlignment = Enum.TextXAlignment.Left
+htitle.TextYAlignment = Enum.TextYAlignment.Center
+local sdot = Instance.new("Frame", header)
+sdot.Size = UDim2.new(0,6,0,6); sdot.Position = UDim2.new(1,-6,0.5,-3)
+sdot.BackgroundColor3 = hex("#2a2a30"); sdot.BorderSizePixel = 0
+Instance.new("UICorner", sdot).CornerRadius = UDim.new(1,0)
+div(1)
 
 local function refreshStatus()
-    local live = (State.aimlockOn or State.espOn) and not State.safeOn
-    tw(statusDot, { BackgroundColor3 = live and c3("#4ade80") or c3("#2a2a30") }, 0.2)
-    fovCircle.Visible = State.aimlockOn and not State.safeOn
-    fovStroke.Color   = c3(MODE_COLORS[State.mode])
+	local live = (S.aimlock or S.esp) and not S.safe
+	tw(sdot, {BackgroundColor3 = live and hex("#4ade80") or hex("#2a2a30")}, 0.2)
 end
 
--- ── Toggle builder ──
-local function makeToggle(order, name, iconId, onChange)
-    local row, _ = makeRow(order, 44)
-
-    local iconBox = Instance.new("Frame", row)
-    iconBox.Size             = UDim2.new(0, 28, 0, 28)
-    iconBox.Position         = UDim2.new(0, 10, 0.5, -14)
-    iconBox.BackgroundColor3 = c3("#1e1e22")
-    iconBox.BorderSizePixel  = 0
-    Instance.new("UICorner", iconBox).CornerRadius = UDim.new(0, 7)
-
-    local img = Instance.new("ImageLabel", iconBox)
-    img.Size = UDim2.new(0,14,0,14); img.Position = UDim2.new(0.5,-7,0.5,-7)
-    img.BackgroundTransparency = 1; img.Image = iconId
-    img.ImageColor3 = c3("#3a3a44")
-
-    local lbl = Instance.new("TextLabel", row)
-    lbl.Text = name; lbl.TextSize = 13; lbl.Font = Enum.Font.GothamBold
-    lbl.TextColor3 = c3("#5a5a66"); lbl.BackgroundTransparency = 1
-    lbl.Position = UDim2.new(0,46,0,0); lbl.Size = UDim2.new(1,-96,1,0)
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    local swBG = Instance.new("Frame", row)
-    swBG.Size = UDim2.new(0,34,0,19); swBG.Position = UDim2.new(1,-44,0.5,-9.5)
-    swBG.BackgroundColor3 = c3("#222226"); swBG.BorderSizePixel = 0
-    Instance.new("UICorner", swBG).CornerRadius = UDim.new(1,0)
-
-    local knob = Instance.new("Frame", swBG)
-    knob.Size = UDim2.new(0,13,0,13); knob.Position = UDim2.new(0,3,0.5,-6.5)
-    knob.BackgroundColor3 = c3("#3a3a44"); knob.BorderSizePixel = 0
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
-
-    local on = false
-
-    local function setOn(v)
-        on = v
-        tw(swBG,    { BackgroundColor3 = v and c3("#3a7d44") or c3("#222226") }, 0.18)
-        tw(knob,    { Position = v and UDim2.new(0,18,0.5,-6.5) or UDim2.new(0,3,0.5,-6.5),
-                      BackgroundColor3 = v and Color3.new(1,1,1) or c3("#3a3a44") }, 0.22, Enum.EasingStyle.Back)
-        tw(lbl,     { TextColor3 = v and c3("#e8e8f0") or c3("#5a5a66") }, 0.18)
-        tw(iconBox, { BackgroundColor3 = v and c3("#1e2d20") or c3("#1e1e22") }, 0.18)
-        tw(img,     { ImageColor3 = v and c3("#4ade80") or c3("#3a3a44") }, 0.18)
-        if onChange then onChange(v) end
-    end
-
-    local btn = Instance.new("TextButton", row)
-    btn.Size = UDim2.new(1,0,1,0); btn.BackgroundTransparency = 1
-    btn.Text = ""; btn.ZIndex = 5
-    btn.MouseButton1Click:Connect(function() setOn(not on) end)
-    btn.MouseEnter:Connect(function() tw(row, { BackgroundColor3 = c3("#18181b") }, 0.13) end)
-    btn.MouseLeave:Connect(function() tw(row, { BackgroundColor3 = c3("#161618") }, 0.13) end)
-
-    return { setOn = setOn, getOn = function() return on end }
+local function makeToggle(order, name)
+	local r, rs = row(order)
+	local ibox = Instance.new("Frame", r)
+	ibox.Size = UDim2.new(0,26,0,26); ibox.Position = UDim2.new(0,9,0.5,-13)
+	ibox.BackgroundColor3 = hex("#1e1e22"); ibox.BorderSizePixel = 0
+	Instance.new("UICorner", ibox).CornerRadius = UDim.new(0,7)
+	local nl = Instance.new("TextLabel", r)
+	nl.Text = name; nl.TextSize = 13; nl.Font = Enum.Font.GothamBold
+	nl.TextColor3 = hex("#5a5a66"); nl.BackgroundTransparency = 1
+	nl.Position = UDim2.new(0,43,0,0); nl.Size = UDim2.new(1,-80,1,0)
+	nl.TextXAlignment = Enum.TextXAlignment.Left
+	local sbg = Instance.new("Frame", r)
+	sbg.Size = UDim2.new(0,32,0,18); sbg.Position = UDim2.new(1,-41,0.5,-9)
+	sbg.BackgroundColor3 = hex("#222226"); sbg.BorderSizePixel = 0
+	Instance.new("UICorner", sbg).CornerRadius = UDim.new(1,0)
+	local knob = Instance.new("Frame", sbg)
+	knob.Size = UDim2.new(0,12,0,12); knob.Position = UDim2.new(0,3,0.5,-6)
+	knob.BackgroundColor3 = hex("#3a3a44"); knob.BorderSizePixel = 0
+	Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
+	local on = false
+	local function setOn(v)
+		on = v
+		tw(sbg, {BackgroundColor3 = v and hex("#3a7d44") or hex("#222226")})
+		tw(knob, {Position = v and UDim2.new(0,17,0.5,-6) or UDim2.new(0,3,0.5,-6), BackgroundColor3 = v and hex("#ffffff") or hex("#3a3a44")}, 0.22, Enum.EasingStyle.Back)
+		tw(nl, {TextColor3 = v and hex("#e8e8f0") or hex("#5a5a66")})
+		tw(ibox, {BackgroundColor3 = v and hex("#1e2d20") or hex("#1e1e22")})
+	end
+	local btn = Instance.new("TextButton", r)
+	btn.Size = UDim2.new(1,0,1,0); btn.BackgroundTransparency = 1; btn.Text = ""; btn.ZIndex = 5
+	btn.MouseButton1Click:Connect(function() setOn(not on); refreshStatus() end)
+	btn.MouseEnter:Connect(function() tw(r, {BackgroundColor3 = hex("#18181b")}) end)
+	btn.MouseLeave:Connect(function() tw(r, {BackgroundColor3 = hex("#161618")}) end)
+	return {setOn=setOn, getOn=function() return on end}
 end
 
--- ── Keybind row builder ──
--- Returns a table with getListening / stopListening / setBound / getKey
-local function makeKeybindRow(order, rowName, subDefault, iconId, onKeySet)
-    local row, rowS = makeRow(order, 80)
-    row.Size = UDim2.new(1,0,0,80)
+local aimT = makeToggle(2, "Aimlock")
+local espT  = makeToggle(3, "ESP")
+div(4)
 
-    local iconBox = Instance.new("Frame", row)
-    iconBox.Size = UDim2.new(0,28,0,28); iconBox.Position = UDim2.new(0,10,0,12)
-    iconBox.BackgroundColor3 = c3("#1e1e22"); iconBox.BorderSizePixel = 0
-    Instance.new("UICorner", iconBox).CornerRadius = UDim.new(0,7)
+local sfRow, sfStroke = row(5, 72)
+sfRow.Size = UDim2.new(1,0,0,72)
+local sfIbox = Instance.new("Frame", sfRow)
+sfIbox.Size = UDim2.new(0,26,0,26); sfIbox.Position = UDim2.new(0,9,0,10)
+sfIbox.BackgroundColor3 = hex("#1e1e22"); sfIbox.BorderSizePixel = 0
+Instance.new("UICorner", sfIbox).CornerRadius = UDim.new(0,7)
+local sfName = Instance.new("TextLabel", sfRow)
+sfName.Text = "SafeSwitch"; sfName.TextSize = 13; sfName.Font = Enum.Font.GothamBold
+sfName.TextColor3 = hex("#e8e8f0"); sfName.BackgroundTransparency = 1
+sfName.Position = UDim2.new(0,43,0,7); sfName.Size = UDim2.new(1,-53,0,18)
+sfName.TextXAlignment = Enum.TextXAlignment.Left
+local sfSub = Instance.new("TextLabel", sfRow)
+sfSub.Text = "No key bound"; sfSub.TextSize = 10; sfSub.Font = Enum.Font.Gotham
+sfSub.TextColor3 = hex("#3a3a44"); sfSub.BackgroundTransparency = 1
+sfSub.Position = UDim2.new(0,43,0,24); sfSub.Size = UDim2.new(1,-53,0,14)
+sfSub.TextXAlignment = Enum.TextXAlignment.Left
+local bindBtn = Instance.new("TextButton", sfRow)
+bindBtn.Size = UDim2.new(1,-18,0,24); bindBtn.Position = UDim2.new(0,9,0,41)
+bindBtn.BackgroundColor3 = hex("#0e0e10"); bindBtn.BorderSizePixel = 0
+bindBtn.Text = "click to bind"; bindBtn.TextSize = 11; bindBtn.Font = Enum.Font.GothamMedium
+bindBtn.TextColor3 = hex("#5a5a70")
+Instance.new("UICorner", bindBtn).CornerRadius = UDim.new(0,7)
+local bStroke = Instance.new("UIStroke", bindBtn); bStroke.Color = hex("#222226"); bStroke.Thickness = 1
 
-    local icon = Instance.new("ImageLabel", iconBox)
-    icon.Size = UDim2.new(0,14,0,14); icon.Position = UDim2.new(0.5,-7,0.5,-7)
-    icon.BackgroundTransparency = 1; icon.Image = iconId
-    icon.ImageColor3 = c3("#3a3a44")
+local listening = false
+local safePrev = {aim=false, esp=false}
 
-    local nameL = Instance.new("TextLabel", row)
-    nameL.Text = rowName; nameL.TextSize = 13; nameL.Font = Enum.Font.GothamBold
-    nameL.TextColor3 = c3("#e8e8f0"); nameL.BackgroundTransparency = 1
-    nameL.Position = UDim2.new(0,46,0,8); nameL.Size = UDim2.new(1,-56,0,18)
-    nameL.TextXAlignment = Enum.TextXAlignment.Left
-
-    local subL = Instance.new("TextLabel", row)
-    subL.Text = subDefault; subL.TextSize = 10; subL.Font = Enum.Font.GothamMedium
-    subL.TextColor3 = c3("#3a3a44"); subL.BackgroundTransparency = 1
-    subL.Position = UDim2.new(0,46,0,26); subL.Size = UDim2.new(1,-56,0,14)
-    subL.TextXAlignment = Enum.TextXAlignment.Left
-
-    local bindBtn = Instance.new("TextButton", row)
-    bindBtn.Size = UDim2.new(1,-20,0,26); bindBtn.Position = UDim2.new(0,10,0,46)
-    bindBtn.BackgroundColor3 = c3("#0e0e10"); bindBtn.BorderSizePixel = 0
-    bindBtn.Text = "click to bind"; bindBtn.TextSize = 11
-    bindBtn.Font = Enum.Font.GothamMedium; bindBtn.TextColor3 = c3("#5a5a70")
-    Instance.new("UICorner", bindBtn).CornerRadius = UDim.new(0,7)
-    local bs = Instance.new("UIStroke", bindBtn)
-    bs.Color = c3("#222226"); bs.Thickness = 1
-
-    local listening = false
-    local boundKey  = nil
-
-    local function setBound(kc)
-        boundKey = kc
-        local kn = tostring(kc):gsub("Enum%.KeyCode%.","")
-        bindBtn.Text = "[  "..kn.."  ]"
-        bindBtn.TextColor3 = c3("#c8c8d4")
-        subL.Text = "Bound to  "..kn
-        tw(subL, { TextColor3 = c3("#888898") }, 0.2)
-        if onKeySet then onKeySet(kc) end
-    end
-
-    bindBtn.MouseButton1Click:Connect(function()
-        if listening then return end
-        listening = true
-        bindBtn.Text = "press any key…"
-        bindBtn.TextColor3 = c3("#5a5a70")
-        tw(bindBtn, { BackgroundColor3 = c3("#12121a") }, 0.15)
-    end)
-
-    return {
-        row          = row,
-        rowStroke    = rowS,
-        iconBox      = iconBox,
-        icon         = icon,
-        getListening = function() return listening end,
-        stopListening = function()
-            listening = false
-            tw(bindBtn, { BackgroundColor3 = c3("#0e0e10") }, 0.15)
-        end,
-        setBound = setBound,
-        getKey   = function() return boundKey end,
-    }
+local function setSafe(v)
+	S.safe = v
+	if v then
+		safePrev.aim = aimT.getOn(); safePrev.esp = espT.getOn()
+		aimT.setOn(false); espT.setOn(false)
+		tw(sfRow,    {BackgroundColor3 = hex("#130e0e")})
+		tw(sfStroke, {Color = hex("#2a1e1e")})
+		tw(sfIbox,   {BackgroundColor3 = hex("#2a1a1a")})
+		Panel.Visible = false
+		FOVCircle.Visible = false
+	else
+		aimT.setOn(safePrev.aim); espT.setOn(safePrev.esp)
+		tw(sfRow,    {BackgroundColor3 = hex("#161618")})
+		tw(sfStroke, {Color = hex("#202024")})
+		tw(sfIbox,   {BackgroundColor3 = hex("#1e1e22")})
+		Panel.Visible = true
+	end
+	refreshStatus()
 end
 
--- ─────────────────────────────────────────────
---  BUILD UI
--- ─────────────────────────────────────────────
-local aimT = makeToggle(2, "Aimlock", "rbxassetid://7733960981", function(v)
-    State.aimlockOn = v; refreshStatus()
+bindBtn.MouseButton1Click:Connect(function()
+	if listening then return end
+	listening = true
+	bindBtn.Text = "press any key…"; bindBtn.TextColor3 = hex("#5a5a70")
 end)
 
-local espT = makeToggle(3, "ESP", "rbxassetid://7733964370", function(v)
-    State.espOn = v; refreshStatus()
-end)
-
-makeDivider(4)
-
--- Aimlock Keybind
-local aimBind = makeKeybindRow(
-    5, "Aimlock Key", "Default: hold RMB",
-    "rbxassetid://7733960981",
-    function(kc) State.aimKey = kc end
-)
-
-makeDivider(6)
-
--- SafeSwitch Keybind
-local safeBind = makeKeybindRow(
-    7, "SafeSwitch", "No key — everything stays on",
-    "rbxassetid://7733717558",
-    function(kc) State.safeKey = kc end
-)
-
--- SafeSwitch armed visual
-local function setSafeVisual(v)
-    local r, s, ib, ic = safeBind.row, safeBind.rowStroke, safeBind.iconBox, safeBind.icon
-    if v then
-        tw(r,  { BackgroundColor3 = c3("#130e0e") }, 0.2)
-        tw(s,  { Color = c3("#2a1e1e") }, 0.2)
-        tw(ib, { BackgroundColor3 = c3("#2a1a1a") }, 0.2)
-        tw(ic, { ImageColor3 = c3("#e07070") }, 0.2)
-    else
-        tw(r,  { BackgroundColor3 = c3("#161618") }, 0.2)
-        tw(s,  { Color = c3("#202024") }, 0.2)
-        tw(ib, { BackgroundColor3 = c3("#1e1e22") }, 0.2)
-        tw(ic, { ImageColor3 = c3("#3a3a44") }, 0.2)
-    end
-end
-
-local safePrev = { aim = false, esp = false }
-
-local function toggleSafe()
-    if not State.safeOn then
-        safePrev.aim = aimT.getOn(); safePrev.esp = espT.getOn()
-        aimT.setOn(false); espT.setOn(false)
-        State.safeOn = true
-        setSafeVisual(true)
-    else
-        State.safeOn = false
-        setSafeVisual(false)
-        aimT.setOn(safePrev.aim); espT.setOn(safePrev.esp)
-    end
-    refreshStatus()
-end
-
-makeDivider(8)
-
--- ── Mode Dropdown ──
-local dropRow = Instance.new("Frame", Panel)
-dropRow.Size = UDim2.new(1,0,0,44); dropRow.BackgroundColor3 = c3("#161618")
-dropRow.BorderSizePixel = 0; dropRow.LayoutOrder = 9; dropRow.ClipsDescendants = false
-Instance.new("UICorner", dropRow).CornerRadius = UDim.new(0,9)
-local drs = Instance.new("UIStroke", dropRow); drs.Color = c3("#202024"); drs.Thickness = 1
-
-local dib = Instance.new("Frame", dropRow)
-dib.Size = UDim2.new(0,28,0,28); dib.Position = UDim2.new(0,10,0.5,-14)
-dib.BackgroundColor3 = c3("#1e1e22"); dib.BorderSizePixel = 0
-Instance.new("UICorner", dib).CornerRadius = UDim.new(0,7)
-local dii = Instance.new("ImageLabel", dib)
-dii.Size = UDim2.new(0,14,0,14); dii.Position = UDim2.new(0.5,-7,0.5,-7)
-dii.BackgroundTransparency = 1; dii.Image = "rbxassetid://7734053495"
-dii.ImageColor3 = c3("#3a3a44")
-
-local dropDot = Instance.new("Frame", dropRow)
-dropDot.Size = UDim2.new(0,7,0,7); dropDot.Position = UDim2.new(1,-30,0.5,-3.5)
-dropDot.BackgroundColor3 = c3("#2a2a32"); dropDot.BorderSizePixel = 0
-Instance.new("UICorner", dropDot).CornerRadius = UDim.new(1,0)
-
-local dropLabel = Instance.new("TextLabel", dropRow)
-dropLabel.Text = "Set mode…"; dropLabel.TextSize = 13; dropLabel.Font = Enum.Font.GothamBold
-dropLabel.TextColor3 = c3("#5a5a66"); dropLabel.BackgroundTransparency = 1
-dropLabel.Position = UDim2.new(0,46,0,0); dropLabel.Size = UDim2.new(1,-80,1,0)
-dropLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-local chevron = Instance.new("ImageLabel", dropRow)
-chevron.Size = UDim2.new(0,14,0,14); chevron.Position = UDim2.new(1,-18,0.5,-7)
-chevron.BackgroundTransparency = 1; chevron.Image = "rbxassetid://7072706796"
-chevron.ImageColor3 = c3("#3a3a44")
+div(6)
 
 local MODES = {
-    { name="Silent",     color="#3a3a44", sub="low"  },
-    { name="Moderate",   color="#72afe8", sub="mid"  },
-    { name="Aggressive", color="#f5b942", sub="high" },
-    { name="Legit",      color="#4ade80", sub="safe" },
-    { name="Rage",       color="#e07070", sub="max"  },
+	{name="Silent",     color="#3a3a44", sub="low"},
+	{name="Moderate",   color="#72afe8", sub="mid"},
+	{name="Aggressive", color="#f5b942", sub="high"},
+	{name="Legit",      color="#4ade80", sub="safe"},
+	{name="Rage",       color="#e07070", sub="max"},
 }
-local MENU_H = #MODES * 36 + 10
 
-local dropMenu = Instance.new("Frame", dropRow)
-dropMenu.Size = UDim2.new(1,0,0,0); dropMenu.Position = UDim2.new(0,0,1,7)
-dropMenu.BackgroundColor3 = c3("#111113"); dropMenu.BorderSizePixel = 0
-dropMenu.ClipsDescendants = true; dropMenu.Visible = false; dropMenu.ZIndex = 20
-Instance.new("UICorner", dropMenu).CornerRadius = UDim.new(0,10)
-local dms = Instance.new("UIStroke", dropMenu); dms.Color = c3("#222226"); dms.Thickness = 1
-local dml = Instance.new("UIListLayout", dropMenu)
+local dropRow, dropStroke = row(7)
+dropRow.ClipsDescendants = false
+local dLabel = Instance.new("TextLabel", dropRow)
+dLabel.Text = "Set mode…"; dLabel.TextSize = 13; dLabel.Font = Enum.Font.GothamBold
+dLabel.TextColor3 = hex("#5a5a66"); dLabel.BackgroundTransparency = 1
+dLabel.Position = UDim2.new(0,43,0,0); dLabel.Size = UDim2.new(1,-70,1,0)
+dLabel.TextXAlignment = Enum.TextXAlignment.Left
+local dDot = Instance.new("Frame", dropRow)
+dDot.Size = UDim2.new(0,7,0,7); dDot.Position = UDim2.new(1,-28,0.5,-3.5)
+dDot.BackgroundColor3 = hex("#2a2a32"); dDot.BorderSizePixel = 0
+Instance.new("UICorner", dDot).CornerRadius = UDim.new(1,0)
+local dChev = Instance.new("TextLabel", dropRow)
+dChev.Text = "▾"; dChev.TextSize = 12; dChev.Font = Enum.Font.GothamBold
+dChev.TextColor3 = hex("#3a3a44"); dChev.BackgroundTransparency = 1
+dChev.Position = UDim2.new(1,-18,0,0); dChev.Size = UDim2.new(0,14,1,0)
+dChev.TextXAlignment = Enum.TextXAlignment.Left
+
+local dMenu = Instance.new("Frame", dropRow)
+dMenu.Size = UDim2.new(1,0,0,0); dMenu.Position = UDim2.new(0,0,1,6)
+dMenu.BackgroundColor3 = hex("#111113"); dMenu.BorderSizePixel = 0
+dMenu.ClipsDescendants = true; dMenu.Visible = false; dMenu.ZIndex = 20
+Instance.new("UICorner", dMenu).CornerRadius = UDim.new(0,10)
+local dms = Instance.new("UIStroke", dMenu); dms.Color = hex("#222226"); dms.Thickness = 1
+local dml = Instance.new("UIListLayout", dMenu)
 dml.SortOrder = Enum.SortOrder.LayoutOrder; dml.Padding = UDim.new(0,0)
-local dmp = Instance.new("UIPadding", dropMenu)
+local dmp = Instance.new("UIPadding", dMenu)
 dmp.PaddingTop = UDim.new(0,5); dmp.PaddingBottom = UDim.new(0,5)
 dmp.PaddingLeft = UDim.new(0,5); dmp.PaddingRight = UDim.new(0,5)
 
-local menuOpen = false
-local menuItems = {}
+local mOpen = false
+local MENU_H = #MODES * 34 + 10
+local mItems = {}
 
 for i, m in ipairs(MODES) do
-    local item = Instance.new("TextButton", dropMenu)
-    item.Size = UDim2.new(1,0,0,36); item.BackgroundColor3 = c3("#111113")
-    item.BorderSizePixel = 0; item.Text = ""; item.LayoutOrder = i; item.ZIndex = 22
-    Instance.new("UICorner", item).CornerRadius = UDim.new(0,7)
-
-    local iDot = Instance.new("Frame", item)
-    iDot.Size = UDim2.new(0,7,0,7); iDot.Position = UDim2.new(0,10,0.5,-3.5)
-    iDot.BackgroundColor3 = c3(m.color); iDot.BorderSizePixel = 0
-    Instance.new("UICorner", iDot).CornerRadius = UDim.new(1,0)
-
-    local iLbl = Instance.new("TextLabel", item)
-    iLbl.Text = m.name; iLbl.TextSize = 13; iLbl.Font = Enum.Font.GothamBold
-    iLbl.TextColor3 = c3("#c8c8d4"); iLbl.BackgroundTransparency = 1
-    iLbl.Position = UDim2.new(0,26,0,0); iLbl.Size = UDim2.new(1,-70,1,0)
-    iLbl.TextXAlignment = Enum.TextXAlignment.Left; iLbl.ZIndex = 23
-
-    local iMeta = Instance.new("TextLabel", item)
-    iMeta.Text = m.sub; iMeta.TextSize = 10; iMeta.Font = Enum.Font.GothamMedium
-    iMeta.TextColor3 = c3("#3a3a44"); iMeta.BackgroundTransparency = 1
-    iMeta.Position = UDim2.new(1,-40,0,0); iMeta.Size = UDim2.new(0,36,1,0)
-    iMeta.TextXAlignment = Enum.TextXAlignment.Right; iMeta.ZIndex = 23
-
-    local check = Instance.new("ImageLabel", item)
-    check.Size = UDim2.new(0,12,0,12); check.Position = UDim2.new(1,-14,0.5,-6)
-    check.BackgroundTransparency = 1; check.Image = "rbxassetid://7072725342"
-    check.ImageColor3 = c3("#4ade80"); check.ImageTransparency = 1; check.ZIndex = 23
-
-    menuItems[i] = { item=item, check=check, name=m.name, color=m.color }
-
-    item.MouseEnter:Connect(function() tw(item,{BackgroundColor3=c3("#1a1a1e")},0.12) end)
-    item.MouseLeave:Connect(function() tw(item,{BackgroundColor3=c3("#111113")},0.12) end)
-
-    item.MouseButton1Click:Connect(function()
-        State.mode = m.name
-        dropLabel.Text = m.name
-        tw(dropLabel, { TextColor3 = c3("#e8e8f0") }, 0.18)
-        tw(dropDot,   { BackgroundColor3 = c3(m.color) }, 0.2)
-        tw(fovStroke, { Color = c3(m.color) }, 0.3)
-
-        for _, mi in ipairs(menuItems) do
-            tw(mi.check, { ImageTransparency = mi.name==m.name and 0 or 1 }, 0.15)
-            tw(mi.item,  { BackgroundColor3  = mi.name==m.name and c3("#161a17") or c3("#111113") }, 0.15)
-        end
-
-        task.delay(0.1, function()
-            menuOpen = false
-            tw(dropMenu, { Size = UDim2.new(1,0,0,0) }, 0.22, Enum.EasingStyle.Quart)
-            task.delay(0.22, function() dropMenu.Visible = false end)
-            tw(chevron,  { Rotation = 0 }, 0.28)
-            tw(dropRow,  { BackgroundColor3 = c3("#161618") }, 0.15)
-        end)
-    end)
+	local it = Instance.new("TextButton", dMenu)
+	it.Size = UDim2.new(1,0,0,34); it.BackgroundColor3 = hex("#111113")
+	it.BorderSizePixel = 0; it.Text = ""; it.LayoutOrder = i; it.ZIndex = 22
+	Instance.new("UICorner", it).CornerRadius = UDim.new(0,7)
+	local idot = Instance.new("Frame", it)
+	idot.Size = UDim2.new(0,7,0,7); idot.Position = UDim2.new(0,9,0.5,-3.5)
+	idot.BackgroundColor3 = hex(m.color); idot.BorderSizePixel = 0
+	Instance.new("UICorner", idot).CornerRadius = UDim.new(1,0)
+	local ilbl = Instance.new("TextLabel", it)
+	ilbl.Text = m.name; ilbl.TextSize = 13; ilbl.Font = Enum.Font.GothamBold
+	ilbl.TextColor3 = hex("#c8c8d4"); ilbl.BackgroundTransparency = 1
+	ilbl.Position = UDim2.new(0,24,0,0); ilbl.Size = UDim2.new(1,-55,1,0)
+	ilbl.TextXAlignment = Enum.TextXAlignment.Left; ilbl.ZIndex = 23
+	local imeta = Instance.new("TextLabel", it)
+	imeta.Text = m.sub; imeta.TextSize = 10; imeta.Font = Enum.Font.GothamMedium
+	imeta.TextColor3 = hex("#3a3a44"); imeta.BackgroundTransparency = 1
+	imeta.Position = UDim2.new(1,-36,0,0); imeta.Size = UDim2.new(0,32,1,0)
+	imeta.TextXAlignment = Enum.TextXAlignment.Right; imeta.ZIndex = 23
+	local ick = Instance.new("TextLabel", it)
+	ick.Text = "✓"; ick.TextSize = 11; ick.Font = Enum.Font.GothamBold
+	ick.TextColor3 = hex("#4ade80"); ick.BackgroundTransparency = 1
+	ick.Position = UDim2.new(1,-14,0,0); ick.Size = UDim2.new(0,12,1,0)
+	ick.TextXAlignment = Enum.TextXAlignment.Left
+	ick.TextTransparency = 1; ick.ZIndex = 23
+	mItems[i] = {it=it, ick=ick, name=m.name, color=m.color}
+	it.MouseEnter:Connect(function() tw(it, {BackgroundColor3 = hex("#1a1a1e")}) end)
+	it.MouseLeave:Connect(function() tw(it, {BackgroundColor3 = hex("#111113")}) end)
+	it.MouseButton1Click:Connect(function()
+		S.mode = m.name
+		tw(dLabel, {TextColor3 = hex("#e8e8f0")}); dLabel.Text = m.name
+		tw(dDot, {BackgroundColor3 = hex(m.color)})
+		for _, mi in ipairs(mItems) do
+			tw(mi.ick, {TextTransparency = mi.name == m.name and 0 or 1})
+			tw(mi.it, {BackgroundColor3 = mi.name == m.name and hex("#161a17") or hex("#111113")})
+		end
+		task.delay(0.1, function()
+			mOpen = false
+			tween(dMenu, {Size = UDim2.new(1,0,0,0)}, 0.2, Enum.EasingStyle.Quart)
+			task.delay(0.2, function() dMenu.Visible = false end)
+			dChev.Text = "▾"
+		end)
+	end)
 end
 
-local dropBtn = Instance.new("TextButton", dropRow)
-dropBtn.Size = UDim2.new(1,0,1,0); dropBtn.BackgroundTransparency = 1
-dropBtn.Text = ""; dropBtn.ZIndex = 10
-dropBtn.MouseButton1Click:Connect(function()
-    menuOpen = not menuOpen
-    if menuOpen then
-        dropMenu.Visible = true; dropMenu.Size = UDim2.new(1,0,0,0)
-        tw(dropMenu, { Size = UDim2.new(1,0,0,MENU_H) }, 0.28, Enum.EasingStyle.Quart)
-        tw(chevron,  { Rotation = 180 }, 0.28)
-        tw(dropRow,  { BackgroundColor3 = c3("#18181b") }, 0.15)
-    else
-        tw(dropMenu, { Size = UDim2.new(1,0,0,0) }, 0.22, Enum.EasingStyle.Quart)
-        task.delay(0.22, function() dropMenu.Visible = false end)
-        tw(chevron,  { Rotation = 0 }, 0.28)
-        tw(dropRow,  { BackgroundColor3 = c3("#161618") }, 0.15)
-    end
+local function tween(o, p, t, s)
+	TweenService:Create(o, TweenInfo.new(t or 0.22, s or Enum.EasingStyle.Quart, Enum.EasingDirection.Out), p):Play()
+end
+
+local dBtn = Instance.new("TextButton", dropRow)
+dBtn.Size = UDim2.new(1,0,1,0); dBtn.BackgroundTransparency = 1; dBtn.Text = ""; dBtn.ZIndex = 10
+dBtn.MouseButton1Click:Connect(function()
+	mOpen = not mOpen
+	if mOpen then
+		dMenu.Visible = true; dMenu.Size = UDim2.new(1,0,0,0)
+		tween(dMenu, {Size = UDim2.new(1,0,0,MENU_H)})
+		dChev.Text = "▴"
+		tw(dropRow, {BackgroundColor3 = hex("#18181b")})
+	else
+		tween(dMenu, {Size = UDim2.new(1,0,0,0)})
+		task.delay(0.22, function() dMenu.Visible = false end)
+		dChev.Text = "▾"
+		tw(dropRow, {BackgroundColor3 = hex("#161618")})
+	end
 end)
-dropBtn.MouseEnter:Connect(function() tw(dropRow,{BackgroundColor3=c3("#18181b")},0.15) end)
-dropBtn.MouseLeave:Connect(function()
-    if not menuOpen then tw(dropRow,{BackgroundColor3=c3("#161618")},0.15) end
-end)
+dBtn.MouseEnter:Connect(function() tw(dropRow, {BackgroundColor3 = hex("#18181b")}) end)
+dBtn.MouseLeave:Connect(function() if not mOpen then tw(dropRow, {BackgroundColor3 = hex("#161618")}) end end)
 
--- ─────────────────────────────────────────────
---  INPUT
--- ─────────────────────────────────────────────
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-
-    -- aimlock bind
-    if aimBind.getListening() then
-        aimBind.stopListening()
-        aimBind.setBound(input.KeyCode)
-        return
-    end
-
-    -- safeswitch bind
-    if safeBind.getListening() then
-        safeBind.stopListening()
-        safeBind.setBound(input.KeyCode)
-        return
-    end
-
-    if gameProcessed then return end
-
-    if State.safeKey and input.KeyCode == State.safeKey then
-        toggleSafe()
-    end
-end)
-
--- ─────────────────────────────────────────────
---  DRAG  (header)
--- ─────────────────────────────────────────────
 do
-    local dragging, dragStart, panelStart = false, nil, nil
-
-    local dragHandle = Instance.new("TextButton", header)
-    dragHandle.Size = UDim2.new(1,0,1,0)
-    dragHandle.BackgroundTransparency = 1
-    dragHandle.Text = ""; dragHandle.ZIndex = 10
-
-    dragHandle.MouseButton1Down:Connect(function(x, y)
-        dragging   = true
-        dragStart  = Vector2.new(x, y)
-        panelStart = Panel.Position
-    end)
-
-    UserInputService.InputChanged:Connect(function(inp)
-        if dragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = Vector2.new(inp.Position.X, inp.Position.Y) - dragStart
-            Panel.Position = UDim2.new(
-                panelStart.X.Scale, panelStart.X.Offset + delta.X,
-                panelStart.Y.Scale, panelStart.Y.Offset + delta.Y
-            )
-        end
-    end)
-
-    UserInputService.InputEnded:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
+	local drag, ds, ps = false, nil, nil
+	local dh = Instance.new("TextButton", header)
+	dh.Size = UDim2.new(1,0,1,0); dh.BackgroundTransparency = 1; dh.Text = ""; dh.ZIndex = 2
+	dh.MouseButton1Down:Connect(function(x, y)
+		drag = true; ds = Vector2.new(x,y); ps = Panel.Position
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
+			local d = Vector2.new(i.Position.X, i.Position.Y) - ds
+			Panel.Position = UDim2.new(ps.X.Scale, ps.X.Offset+d.X, ps.Y.Scale, ps.Y.Offset+d.Y)
+		end
+	end)
+	UIS.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
+	end)
 end
 
--- ─────────────────────────────────────────────
---  RENDER LOOP
--- ─────────────────────────────────────────────
+UIS.InputBegan:Connect(function(input, gpe)
+	if listening and input.UserInputType == Enum.UserInputType.Keyboard then
+		listening = false
+		S.safeKey = input.KeyCode
+		local kn = tostring(input.KeyCode):gsub("Enum.KeyCode.","")
+		bindBtn.Text = "[  "..kn.."  ]"; bindBtn.TextColor3 = hex("#c8c8d4")
+		sfSub.Text = "Press "..kn.." to toggle"; tw(sfSub, {TextColor3 = hex("#888898")})
+		return
+	end
+	if not gpe and input.UserInputType == Enum.UserInputType.Keyboard then
+		if S.safeKey and input.KeyCode == S.safeKey then
+			setSafe(not S.safe)
+		end
+	end
+end)
+
 RunService.RenderStepped:Connect(function()
-    doAimlock()
-    updateESP()
-
-    -- FOV circle: scale with mode's fov (75 to 300px)
-    if State.aimlockOn and not State.safeOn then
-        local cfg  = State.modeSettings[State.mode]
-        local pct  = math.clamp(cfg.fov / 360, 0, 1)
-        local size = 75 + pct * 225
-        fovCircle.Size = UDim2.new(0, size, 0, size)
-    end
+	doAimlock()
+	updateESP()
+	updateFOV()
+	refreshStatus()
 end)
 
--- ─────────────────────────────────────────────
---  CLEANUP
--- ─────────────────────────────────────────────
-ScreenGui.AncestryChanged:Connect(function()
-    for plr in pairs(espObjects) do removeESPFor(plr) end
-    espFolder:Destroy()
+Players.PlayerRemoving:Connect(function(p) removeESP(p) end)
+SG.AncestryChanged:Connect(function()
+	for p in pairs(espObjs) do removeESP(p) end
+	espFolder:Destroy(); FOVCircle:Remove()
 end)
-Players.PlayerRemoving:Connect(function(plr) removeESPFor(plr) end)
