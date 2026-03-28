@@ -2,39 +2,56 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local ESP_COLOR_DEFAULT = Color3.fromRGB(0, 120, 255)
 local FACE_COLOR = Color3.fromRGB(0, 255, 0)
-local DEFAULT_COLOR = Color3.fromRGB(0, 120, 255)
+local SMOOTHNESS = 0.8
+local FOV_RADIUS = 150
+local aimlockOn = false
 local espEnabled = true
+local savedCF = nil
+local killed = false
 local MIN_THICKNESS = 1
 local MAX_THICKNESS = 4
 local THICKNESS_DIST = 50
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "ESP_GUI"
+screenGui.Name = "MAIN_GUI"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
 screenGui.Parent = LocalPlayer.PlayerGui
 local label = Instance.new("TextLabel")
-label.Size = UDim2.new(0, 240, 0, 36)
+label.Size = UDim2.new(0, 300, 0, 36)
 label.Position = UDim2.new(0, 10, 0, 10)
 label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 label.BackgroundTransparency = 0.4
 label.TextColor3 = Color3.fromRGB(0, 255, 0)
 label.TextScaled = true
 label.Font = Enum.Font.GothamBold
-label.Text = "ESP: ON  [T] Toggle  [H] Delete"
+label.Text = "ESP: ON | AIM: OFF | [T] Toggle [H] Del"
 label.Parent = screenGui
 local uic = Instance.new("UICorner")
 uic.CornerRadius = UDim.new(0, 6)
 uic.Parent = label
-local camera = workspace.CurrentCamera
+local circle = Instance.new("Frame")
+circle.Size = UDim2.new(0, FOV_RADIUS * 2, 0, FOV_RADIUS * 2)
+circle.Position = UDim2.new(0.5, -FOV_RADIUS, 0.5, -FOV_RADIUS)
+circle.BackgroundTransparency = 1
+circle.BorderSizePixel = 0
+circle.Visible = false
+circle.Parent = screenGui
+local circleCorner = Instance.new("UICorner")
+circleCorner.CornerRadius = UDim.new(1, 0)
+circleCorner.Parent = circle
+local circleStroke = Instance.new("UIStroke")
+circleStroke.Thickness = 2
+circleStroke.Color = Color3.fromRGB(0, 255, 0)
+circleStroke.Parent = circle
 local function getTeamColor(player)
-	if player.Team then
-		return player.TeamColor.Color
-	end
-	return DEFAULT_COLOR
+	if player.Team then return player.TeamColor.Color end
+	return ESP_COLOR_DEFAULT
 end
 local function worldToScreen(pos)
-	local sp, onScreen = camera:WorldToViewportPoint(pos)
+	local sp, onScreen = Camera:WorldToViewportPoint(pos)
 	return Vector2.new(sp.X, sp.Y), onScreen, sp.Z
 end
 local function getThickness(depth)
@@ -60,20 +77,13 @@ local function drawLinePts(posA, posB, frame)
 	end
 end
 local R15_BONES = {
-	{"Head","UpperTorso"},
-	{"UpperTorso","LowerTorso"},
-	{"UpperTorso","LeftUpperArm"},
-	{"UpperTorso","RightUpperArm"},
-	{"LeftUpperArm","LeftLowerArm"},
-	{"LeftLowerArm","LeftHand"},
-	{"RightUpperArm","RightLowerArm"},
-	{"RightLowerArm","RightHand"},
-	{"LowerTorso","LeftUpperLeg"},
-	{"LowerTorso","RightUpperLeg"},
-	{"LeftUpperLeg","LeftLowerLeg"},
-	{"LeftLowerLeg","LeftFoot"},
-	{"RightUpperLeg","RightLowerLeg"},
-	{"RightLowerLeg","RightFoot"},
+	{"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
+	{"UpperTorso","LeftUpperArm"},{"UpperTorso","RightUpperArm"},
+	{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
+	{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+	{"LowerTorso","LeftUpperLeg"},{"LowerTorso","RightUpperLeg"},
+	{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
+	{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
 }
 local R6_SEGMENT_COUNT = 12
 local function getR6Segments(char)
@@ -148,23 +158,18 @@ end
 local function setupCharacter(player, character)
 	cleanupPlayer(player)
 	local faceLine = createLine(FACE_COLOR)
-	espData[player] = {
-		character = character,
-		lines = {},
-		r15 = false,
-		faceLine = faceLine,
-		ready = false,
-	}
+	espData[player] = {character=character, lines={}, r15=false, faceLine=faceLine, ready=false}
 	task.spawn(function()
 		if not character.Parent then return end
 		local w = 0
 		repeat
 			task.wait(0.1) w += 0.1
+			if killed then return end
 			if not character.Parent then return end
 			if espData[player] and espData[player].character ~= character then return end
 			if character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso") then break end
 		until w >= 5
-		if not character.Parent then return end
+		if killed or not character.Parent then return end
 		if not espData[player] or espData[player].character ~= character then return end
 		local r15 = character:FindFirstChild("UpperTorso") ~= nil
 		local needed = r15
@@ -173,13 +178,14 @@ local function setupCharacter(player, character)
 		w = 0
 		repeat
 			task.wait(0.1) w += 0.1
+			if killed then return end
 			if not character.Parent then return end
 			if espData[player] and espData[player].character ~= character then return end
 			local ok = true
 			for _, n in ipairs(needed) do if not character:FindFirstChild(n) then ok = false break end end
 			if ok then break end
 		until w >= 5
-		if not character.Parent then return end
+		if killed or not character.Parent then return end
 		if not espData[player] or espData[player].character ~= character then return end
 		local col = getTeamColor(player)
 		local count = r15 and #R15_BONES or R6_SEGMENT_COUNT
@@ -192,22 +198,104 @@ local function setupCharacter(player, character)
 end
 local function setupPlayer(player)
 	if player == LocalPlayer then return end
-	-- update colors if team changes
-	player:GetPropertyChangedSignal("Team"):Connect(function()
-		updateLineColors(player)
-	end)
+	player:GetPropertyChangedSignal("Team"):Connect(function() updateLineColors(player) end)
 	player.CharacterAdded:Connect(function(c)
 		cleanupPlayer(player)
 		setupCharacter(player, c)
 	end)
-	if player.Character then
-		setupCharacter(player, player.Character)
-	end
+	if player.Character then setupCharacter(player, player.Character) end
 end
 for _, p in ipairs(Players:GetPlayers()) do setupPlayer(p) end
 Players.PlayerAdded:Connect(setupPlayer)
 Players.PlayerRemoving:Connect(cleanupPlayer)
+local function hasLOS(target)
+	local char = target.Character
+	if not char then return false end
+	local head = char:FindFirstChild("Head")
+	if not head then return false end
+	local origin = Camera.CFrame.Position
+	local params = RaycastParams.new()
+	params.FilterDescendantsInstances = {LocalPlayer.Character, char}
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	return workspace:Raycast(origin, head.Position - origin, params) == nil
+end
+local function getClosestTarget()
+	local closestPlayer = nil
+	local closestDist = FOV_RADIUS
+	local centerX = Camera.ViewportSize.X / 2
+	local centerY = Camera.ViewportSize.Y / 2
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player == LocalPlayer then continue end
+		local char = player.Character
+		if not char then continue end
+		local head = char:FindFirstChild("Head")
+		if not head then continue end
+		local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+		if not onScreen then continue end
+		local dist = Vector2.new(screenPos.X - centerX, screenPos.Y - centerY).Magnitude
+		if dist < closestDist and hasLOS(player) then
+			closestDist = dist
+			closestPlayer = player
+		end
+	end
+	return closestPlayer
+end
+local function updateLabel()
+	label.Text = "ESP:"..(espEnabled and "ON" or "OFF").." | AIM:"..(aimlockOn and "ON" or "OFF").." | [T] Toggle [H] Del"
+	label.TextColor3 = espEnabled and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,50,50)
+end
+local function killScript()
+	killed = true
+	aimlockOn = false
+	if savedCF then Camera.CFrame = savedCF savedCF = nil end
+	for _, data in pairs(espData) do
+		for _, l in ipairs(data.lines) do if l and l.Parent then l:Destroy() end end
+		if data.faceLine and data.faceLine.Parent then data.faceLine:Destroy() end
+	end
+	espData = {}
+	screenGui:Destroy()
+	script:Destroy()
+end
+UserInputService.InputBegan:Connect(function(input, gp)
+	if killed or gp then return end
+	if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
+		if not espEnabled then return end
+		aimlockOn = not aimlockOn
+		if aimlockOn then
+			savedCF = Camera.CFrame
+			circle.Visible = true
+		else
+			if savedCF then Camera.CFrame = savedCF savedCF = nil end
+			circle.Visible = false
+		end
+		updateLabel()
+	end
+	if input.KeyCode == Enum.KeyCode.T then
+		espEnabled = not espEnabled
+		if not espEnabled then
+			aimlockOn = false
+			if savedCF then Camera.CFrame = savedCF savedCF = nil end
+			circle.Visible = false
+		end
+		updateLabel()
+	end
+	if input.KeyCode == Enum.KeyCode.H then
+		killScript()
+	end
+end)
 RunService.RenderStepped:Connect(function()
+	if killed then return end
+	if aimlockOn and espEnabled then
+		local target = getClosestTarget()
+		if target then
+			local char = target.Character
+			local head = char and char:FindFirstChild("Head")
+			if head then
+				local currentCF = Camera.CFrame
+				Camera.CFrame = currentCF:Lerp(CFrame.new(currentCF.Position, head.Position), SMOOTHNESS)
+			end
+		end
+	end
 	for player, data in pairs(espData) do
 		local char = data.character
 		if not char or not char.Parent or char ~= player.Character then
@@ -217,11 +305,8 @@ RunService.RenderStepped:Connect(function()
 		end
 		local head = char:FindFirstChild("Head")
 		if head and data.faceLine then
-			if not espEnabled then
-				data.faceLine.Visible = false
-			else
-				drawLinePts(head.Position, (head.CFrame * CFrame.new(0, 0, -3.5)).Position, data.faceLine)
-			end
+			if not espEnabled then data.faceLine.Visible = false
+			else drawLinePts(head.Position, (head.CFrame * CFrame.new(0, 0, -3.5)).Position, data.faceLine) end
 		end
 		if not espEnabled or not data.ready then
 			for _, l in ipairs(data.lines) do if l and l.Parent then l.Visible = false end end
@@ -254,22 +339,5 @@ RunService.RenderStepped:Connect(function()
 				drawLinePts(seg[1], seg[2], line)
 			end
 		end
-	end
-end)
-UserInputService.InputBegan:Connect(function(input, gp)
-	if gp then return end
-	if input.KeyCode == Enum.KeyCode.T then
-		espEnabled = not espEnabled
-		label.Text = espEnabled and "ESP: ON  [T] Toggle  [H] Delete" or "ESP: OFF  [T] Toggle  [H] Delete"
-		label.TextColor3 = espEnabled and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,50,50)
-	end
-	if input.KeyCode == Enum.KeyCode.H then
-		for _, data in pairs(espData) do
-			for _, l in ipairs(data.lines) do if l and l.Parent then l:Destroy() end end
-			if data.faceLine and data.faceLine.Parent then data.faceLine:Destroy() end
-		end
-		espData = {}
-		screenGui:Destroy()
-		script:Destroy()
 	end
 end)
