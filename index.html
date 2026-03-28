@@ -226,6 +226,8 @@ local function getClosestTarget()
 	local centerY = Camera.ViewportSize.Y / 2
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player == LocalPlayer then continue end
+		-- skip teammates
+		if player.Team and player.Team == LocalPlayer.Team then continue end
 		local char = player.Character
 		if not char then continue end
 		local head = char:FindFirstChild("Head")
