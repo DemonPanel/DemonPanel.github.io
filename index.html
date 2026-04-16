@@ -5,8 +5,8 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local ESP_COLOR_DEFAULT = Color3.fromRGB(0, 120, 255)
 local FACE_COLOR = Color3.fromRGB(0, 255, 0)
-local SMOOTHNESS = 0.3
-local FOV_RADIUS = 85
+local SMOOTHNESS = 0.6
+local FOV_RADIUS = 100
 local aimlockOn = false
 local espEnabled = true
 local savedCF = nil
@@ -280,13 +280,11 @@ UserInputService.InputBegan:Connect(function(input, gp)
 	if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
 		if not espEnabled then return end
 		aimlockOn = not aimlockOn
-		if aimlockOn then
-			savedCF = Camera.CFrame
-			circle.Visible = true
-		else
-			if savedCF then Camera.CFrame = savedCF savedCF = nil end
-			circle.Visible = false
-		end
+        if aimlockOn then
+	       circle.Visible = true
+       else
+	       circle.Visible = false
+        end
 		updateLabel()
 	end
 	if input.KeyCode == Enum.KeyCode.T then
