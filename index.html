@@ -287,15 +287,18 @@ UserInputService.InputBegan:Connect(function(input, gp)
         end
 		updateLabel()
 	end
-	if input.KeyCode == Enum.KeyCode.T then
-		espEnabled = not espEnabled
-		if not espEnabled then
-			aimlockOn = false
-			if savedCF then Camera.CFrame = savedCF savedCF = nil end
-			circle.Visible = false
-		end
-		updateLabel()
-	end
+	if input.UserInputType == Enum.UserInputType.MouseButton5 then
+    espEnabled = not espEnabled
+    if not espEnabled then
+        aimlockOn = false
+        if savedCF then
+            Camera.CFrame = savedCF
+            savedCF = nil
+        end
+        circle.Visible = false
+    end
+    updateLabel()
+end
 	if input.KeyCode == Enum.KeyCode.H then
 		killScript()
 	end
