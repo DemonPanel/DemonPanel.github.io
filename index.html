@@ -30,7 +30,7 @@ label.BackgroundTransparency = 0.4
 label.TextColor3 = Color3.fromRGB(0, 255, 0)
 label.TextScaled = true
 label.Font = Enum.Font.GothamBold
-label.Text = "ESP: ON | AIM: OFF | [T] Toggle [H] Del"
+label.Text = "ESP: ON | AIM: OFF | [MB5] Toggle [H] Del"
 label.Parent = screenGui
 
 local uic = Instance.new("UICorner")
@@ -98,7 +98,7 @@ local R15_BONES = {
 	{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
 	{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
 	{"LowerTorso","LeftUpperLeg"},{"LowerTorso","RightUpperLeg"},
-	{"LeftUpperArm","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
+	{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
 	{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
 }
 
@@ -314,18 +314,24 @@ local function getClosestTarget()
 end
 
 local function updateLabel()
-	label.Text = "ESP: " .. (espEnabled and "ON" or "OFF") .. " | AIM: " .. (aimlockOn and "ON" or "OFF") .. " | [T] Toggle [H] Del"
+	label.Text = "ESP: " .. (espEnabled and "ON" or "OFF") .. " | AIM: " .. (aimlockOn and "ON" or "OFF") .. " | [MB5] Toggle [H] Del"
 	label.TextColor3 = espEnabled and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,50,50)
 end
 
+-- ✅ PERFECT CLIENT-SIDE DESTROY FUNCTION
 local function killScript()
+	print("🗑️ Destroying script...")
 	killed = true
 	aimlockOn = false
 	circle.Visible = false
+	
+	-- Restore camera
 	if savedCF then 
 		Camera.CFrame = savedCF 
 		savedCF = nil 
 	end
+	
+	-- Destroy all ESP lines
 	for _, data in pairs(espData) do
 		for _, l in ipairs(data.lines) do 
 			if l and l.Parent then 
@@ -337,25 +343,30 @@ local function killScript()
 		end
 	end
 	espData = {}
+	
+	-- Destroy GUI completely
 	screenGui:Destroy()
-	print("Script destroyed!")
+	
+	-- Disconnect all connections (cleanup)
+	print("✅ Script fully destroyed!")
 end
 
--- ✅ FIXED INPUT HANDLING - All keys now work properly
+-- ✅ FIXED INPUT - MouseButton5 ONLY for toggle, H for destroy
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if killed or gameProcessed then return end
 	
-	-- Left/Right Alt = Toggle Aimlock
+	-- Left/Right Alt = Toggle Aimlock (Hold for smooth aimbot)
 	if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
 		if not espEnabled then return end
 		aimlockOn = not aimlockOn
 		circle.Visible = aimlockOn
 		updateLabel()
-		print("Aimlock:", aimlockOn and "ON" or "OFF")
+		print("🎯 Aimlock:", aimlockOn and "ON" or "OFF")
+		return
 	end
 	
-	-- T Key OR MouseButton5 = Toggle ESP
-	if input.KeyCode == Enum.KeyCode.T or input.UserInputType == Enum.UserInputType.MouseButton5 then
+	-- MouseButton5 ONLY = Toggle ESP
+	if input.UserInputType == Enum.UserInputType.MouseButton5 then
 		espEnabled = not espEnabled
 		if not espEnabled then
 			aimlockOn = false
@@ -366,17 +377,26 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 			end
 		end
 		updateLabel()
-		print("ESP:", espEnabled and "ON" or "OFF")
+		print("👁️ ESP:", espEnabled and "ON" or "OFF")
+		return
 	end
 	
-	-- H Key = Destroy Script
+	-- H Key = FULL CLIENT-SIDE DESTROY
 	if input.KeyCode == Enum.KeyCode.H then
 		killScript()
 	end
 end)
 
+-- Save original camera on first aimlock
+local firstAimlock = true
 RunService.RenderStepped:Connect(function()
 	if killed then return end
+	
+	-- Save camera on first aimlock activation
+	if aimlockOn and firstAimlock and espEnabled then
+		savedCF = Camera.CFrame
+		firstAimlock = false
+	end
 	
 	if aimlockOn and espEnabled then
 		local target = getClosestTarget()
@@ -444,16 +464,3 @@ RunService.RenderStepped:Connect(function()
 			end
 		else
 			local segs = getR6Segments(char)
-			for i = 1, #data.lines do
-				local line = data.lines[i]
-				if not line or not line.Parent then continue end
-				local seg = segs[i]
-				if not seg then 
-					line.Visible = false 
-					continue 
-				end
-				drawLinePts(seg[1], seg[2], line)
-			end
-		end
-	end
-end)
