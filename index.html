@@ -98,7 +98,7 @@ local R15_BONES = {
 	{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
 	{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
 	{"LowerTorso","LeftUpperLeg"},{"LowerTorso","RightUpperLeg"},
-	{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
+	{"LeftUpperArm","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
 	{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
 }
 
@@ -314,13 +314,14 @@ local function getClosestTarget()
 end
 
 local function updateLabel()
-	label.Text = "ESP:"..(espEnabled and "ON" or "OFF").." | AIM:"..(aimlockOn and "ON" or "OFF").." | [T] Toggle [H] Del"
+	label.Text = "ESP: " .. (espEnabled and "ON" or "OFF") .. " | AIM: " .. (aimlockOn and "ON" or "OFF") .. " | [T] Toggle [H] Del"
 	label.TextColor3 = espEnabled and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,50,50)
 end
 
 local function killScript()
 	killed = true
 	aimlockOn = false
+	circle.Visible = false
 	if savedCF then 
 		Camera.CFrame = savedCF 
 		savedCF = nil 
@@ -337,31 +338,38 @@ local function killScript()
 	end
 	espData = {}
 	screenGui:Destroy()
+	print("Script destroyed!")
 end
 
-UserInputService.InputBegan:Connect(function(input, gp)
-	if killed or gp then return end
+-- ✅ FIXED INPUT HANDLING - All keys now work properly
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if killed or gameProcessed then return end
 	
+	-- Left/Right Alt = Toggle Aimlock
 	if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
 		if not espEnabled then return end
 		aimlockOn = not aimlockOn
 		circle.Visible = aimlockOn
 		updateLabel()
+		print("Aimlock:", aimlockOn and "ON" or "OFF")
 	end
 	
-	if input.UserInputType == Enum.UserInputType.MouseButton5 then
+	-- T Key OR MouseButton5 = Toggle ESP
+	if input.KeyCode == Enum.KeyCode.T or input.UserInputType == Enum.UserInputType.MouseButton5 then
 		espEnabled = not espEnabled
 		if not espEnabled then
 			aimlockOn = false
+			circle.Visible = false
 			if savedCF then
 				Camera.CFrame = savedCF
 				savedCF = nil
 			end
-			circle.Visible = false
 		end
 		updateLabel()
+		print("ESP:", espEnabled and "ON" or "OFF")
 	end
 	
+	-- H Key = Destroy Script
 	if input.KeyCode == Enum.KeyCode.H then
 		killScript()
 	end
