@@ -260,34 +260,23 @@ local function getClosestTarget()
 	return closestPlayer
 end
 local function updateLabel()
-	label.Text = "ESP:"..(espEnabled and "ON" or "OFF").." | AIM:"..(aimlockOn and "ON" or "OFF").." | [T] Toggle [H] Del"
+	label.Text = "ESP:"..(espEnabled and "ON" or "OFF").." | AIM:"..(aimlockOn and "ON" or "OFF").." | [MB5] Toggle [H] Del"
 	label.TextColor3 = espEnabled and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,50,50)
 end
-local function killScript()
-	killed = true
-	aimlockOn = false
-	if savedCF then Camera.CFrame = savedCF savedCF = nil end
-	for _, data in pairs(espData) do
-		for _, l in ipairs(data.lines) do if l and l.Parent then l:Destroy() end end
-		if data.faceLine and data.faceLine.Parent then data.faceLine:Destroy() end
-	end
-	espData = {}
-	screenGui:Destroy()
-	script:Destroy()
-end
+
 UserInputService.InputBegan:Connect(function(input, gp)
 	if killed or gp then return end
+
+	-- ALT = aimlock (unchanged)
 	if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
 		if not espEnabled then return end
 		aimlockOn = not aimlockOn
-        if aimlockOn then
-	       circle.Visible = true
-       else
-	       circle.Visible = false
-        end
+		circle.Visible = aimlockOn
 		updateLabel()
 	end
-	if input.KeyCode == Enum.KeyCode.T then
+
+	-- 🔥 MB5 toggle (FIXED)
+	if input.UserInputType == Enum.UserInputType.MouseButton5 then
 		espEnabled = not espEnabled
 		if not espEnabled then
 			aimlockOn = false
@@ -296,6 +285,8 @@ UserInputService.InputBegan:Connect(function(input, gp)
 		end
 		updateLabel()
 	end
+
+	-- H = kill script (unchanged)
 	if input.KeyCode == Enum.KeyCode.H then
 		killScript()
 	end
