@@ -6,8 +6,8 @@ local Camera = workspace.CurrentCamera
 
 local ESP_COLOR_DEFAULT = Color3.fromRGB(0, 120, 255)
 local FACE_COLOR = Color3.fromRGB(0, 255, 0)
-local SMOOTHNESS = 0.6
-local FOV_RADIUS = 100
+local SMOOTHNESS = 3
+local FOV_RADIUS = 75
 
 local aimlockOn = false
 local espEnabled = true
@@ -32,7 +32,7 @@ label.BackgroundTransparency = 0.4
 label.TextColor3 = Color3.fromRGB(0, 255, 0)
 label.TextScaled = true
 label.Font = Enum.Font.GothamBold
-label.Text = "ESP: ON | AIM: OFF | [T] Toggle [H] Del"
+label.Text = ""
 label.Parent = screenGui
 
 local uic = Instance.new("UICorner")
@@ -425,14 +425,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
             savedCF = Camera.CFrame
             circle.Visible = true
         else
-            -- Restore camera when disabling aimlock
-            if savedCF then
-                Camera.CFrame = savedCF
-                savedCF = nil
-            end
-            circle.Visible = false
-        end
-        
         updateLabel()
         return
     end
