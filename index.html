@@ -3,22 +3,27 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+
 local ESP_COLOR_DEFAULT = Color3.fromRGB(0, 120, 255)
 local FACE_COLOR = Color3.fromRGB(0, 255, 0)
 local SMOOTHNESS = 0.6
 local FOV_RADIUS = 100
+
 local aimlockOn = false
 local espEnabled = true
 local savedCF = nil
 local killed = false
+
 local MIN_THICKNESS = 1
 local MAX_THICKNESS = 4
 local THICKNESS_DIST = 50
+
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "MAIN_GUI"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
 screenGui.Parent = LocalPlayer.PlayerGui
+
 local label = Instance.new("TextLabel")
 label.Size = UDim2.new(0, 300, 0, 36)
 label.Position = UDim2.new(0, 10, 0, 10)
@@ -29,9 +34,11 @@ label.TextScaled = true
 label.Font = Enum.Font.GothamBold
 label.Text = "ESP: ON | AIM: OFF | [T] Toggle [H] Del"
 label.Parent = screenGui
+
 local uic = Instance.new("UICorner")
 uic.CornerRadius = UDim.new(0, 6)
 uic.Parent = label
+
 local circle = Instance.new("Frame")
 circle.Size = UDim2.new(0, FOV_RADIUS * 2, 0, FOV_RADIUS * 2)
 circle.Position = UDim2.new(0.5, -FOV_RADIUS, 0.5, -FOV_RADIUS)
@@ -39,343 +46,490 @@ circle.BackgroundTransparency = 1
 circle.BorderSizePixel = 0
 circle.Visible = false
 circle.Parent = screenGui
+
 local circleCorner = Instance.new("UICorner")
 circleCorner.CornerRadius = UDim.new(1, 0)
 circleCorner.Parent = circle
+
 local circleStroke = Instance.new("UIStroke")
 circleStroke.Thickness = 2
 circleStroke.Color = Color3.fromRGB(0, 255, 0)
 circleStroke.Parent = circle
+
 local function getTeamColor(player)
-	if player.Team then return player.TeamColor.Color end
-	return ESP_COLOR_DEFAULT
+    if player.Team then
+        return player.TeamColor.Color
+    end
+    return ESP_COLOR_DEFAULT
 end
+
 local function worldToScreen(pos)
-	local sp, onScreen = Camera:WorldToViewportPoint(pos)
-	return Vector2.new(sp.X, sp.Y), onScreen, sp.Z
+    local sp, onScreen = Camera:WorldToViewportPoint(pos)
+    return Vector2.new(sp.X, sp.Y), onScreen, sp.Z
 end
+
 local function getThickness(depth)
-	local t = 1 - math.clamp((depth - 10) / THICKNESS_DIST, 0, 1)
-	return math.max(1, math.floor(MIN_THICKNESS + t * (MAX_THICKNESS - MIN_THICKNESS)))
+    local t = 1 - math.clamp((depth - 10) / THICKNESS_DIST, 0, 1)
+    return math.max(1, math.floor(MIN_THICKNESS + t * (MAX_THICKNESS - MIN_THICKNESS)))
 end
+
 local function drawLine(a, b, frame, depth)
-	local dist = (b - a).Magnitude
-	if dist < 1 then frame.Visible = false return end
-	frame.Size = UDim2.new(0, dist, 0, getThickness(depth))
-	frame.Position = UDim2.new(0, (a.X+b.X)/2, 0, (a.Y+b.Y)/2)
-	frame.AnchorPoint = Vector2.new(0.5, 0.5)
-	frame.Rotation = math.deg(math.atan2(b.Y - a.Y, b.X - a.X))
-	frame.Visible = true
+    local dist = (b - a).Magnitude
+    if dist < 1 then
+        frame.Visible = false
+        return
+    end
+    frame.Size = UDim2.new(0, dist, 0, getThickness(depth))
+    frame.Position = UDim2.new(0, (a.X+b.X)/2, 0, (a.Y+b.Y)/2)
+    frame.AnchorPoint = Vector2.new(0.5, 0.5)
+    frame.Rotation = math.deg(math.atan2(b.Y - a.Y, b.X - a.X))
+    frame.Visible = true
 end
+
 local function drawLinePts(posA, posB, frame)
-	local sA, onA, dA = worldToScreen(posA)
-	local sB, onB, dB = worldToScreen(posB)
-	if (onA or onB) and dA > 0 and dB > 0 then
-		drawLine(sA, sB, frame, (dA+dB)/2)
-	else
-		frame.Visible = false
-	end
+    local sA, onA, dA = worldToScreen(posA)
+    local sB, onB, dB = worldToScreen(posB)
+    if (onA or onB) and dA > 0 and dB > 0 then
+        drawLine(sA, sB, frame, (dA+dB)/2)
+    else
+        frame.Visible = false
+    end
 end
+
 local R15_BONES = {
-	{"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
-	{"UpperTorso","LeftUpperArm"},{"UpperTorso","RightUpperArm"},
-	{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
-	{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
-	{"LowerTorso","LeftUpperLeg"},{"LowerTorso","RightUpperLeg"},
-	{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
-	{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
+    {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
+    {"UpperTorso","LeftUpperArm"},{"UpperTorso","RightUpperArm"},
+    {"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
+    {"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+    {"LowerTorso","LeftUpperLeg"},{"LowerTorso","RightUpperLeg"},
+    {"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
+    {"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
 }
+
 local R6_SEGMENT_COUNT = 12
+
 local function getR6Segments(char)
-	local head = char:FindFirstChild("Head")
-	local torso = char:FindFirstChild("Torso")
-	local lArm = char:FindFirstChild("Left Arm")
-	local rArm = char:FindFirstChild("Right Arm")
-	local lLeg = char:FindFirstChild("Left Leg")
-	local rLeg = char:FindFirstChild("Right Leg")
-	if not (head and torso and lArm and rArm and lLeg and rLeg) then return {} end
-	local cf = torso.CFrame
-	local topOfTorso    = (cf * CFrame.new(0,  1,    0)).Position
-	local bottomOfTorso = (cf * CFrame.new(0, -1,    0)).Position
-	local socketL       = (cf * CFrame.new(-1.5, 0.8, 0)).Position
-	local socketR       = (cf * CFrame.new( 1.5, 0.8, 0)).Position
-	local hipL          = (cf * CFrame.new(-0.6, -1,  0)).Position
-	local hipR          = (cf * CFrame.new( 0.6, -1,  0)).Position
-	local headTop       = (head.CFrame * CFrame.new(0,  0.5, 0)).Position
-	local headBottom    = (head.CFrame * CFrame.new(0, -0.9, 0)).Position
-	local lArmBottom    = (lArm.CFrame * CFrame.new(0, -0.9, 0)).Position
-	local rArmBottom    = (rArm.CFrame * CFrame.new(0, -0.9, 0)).Position
-	local lLegBottom    = (lLeg.CFrame * CFrame.new(0, -1,   0)).Position
-	local rLegBottom    = (rLeg.CFrame * CFrame.new(0, -1,   0)).Position
-	return {
-		{headTop,        headBottom},
-		{headBottom,     topOfTorso},
-		{socketL,        socketR},
-		{socketL,        lArmBottom},
-		{socketR,        rArmBottom},
-		{topOfTorso,     bottomOfTorso},
-		{bottomOfTorso,  hipL},
-		{bottomOfTorso,  hipR},
-		{hipL,           lLeg.Position},
-		{hipR,           rLeg.Position},
-		{lLeg.Position,  lLegBottom},
-		{rLeg.Position,  rLegBottom},
-	}
+    local head = char:FindFirstChild("Head")
+    local torso = char:FindFirstChild("Torso")
+    local lArm = char:FindFirstChild("Left Arm")
+    local rArm = char:FindFirstChild("Right Arm")
+    local lLeg = char:FindFirstChild("Left Leg")
+    local rLeg = char:FindFirstChild("Right Leg")
+    
+    if not (head and torso and lArm and rArm and lLeg and rLeg) then
+        return {}
+    end
+    
+    local cf = torso.CFrame
+    local topOfTorso = (cf * CFrame.new(0, 1, 0)).Position
+    local bottomOfTorso = (cf * CFrame.new(0, -1, 0)).Position
+    local socketL = (cf * CFrame.new(-1.5, 0.8, 0)).Position
+    local socketR = (cf * CFrame.new( 1.5, 0.8, 0)).Position
+    local hipL = (cf * CFrame.new(-0.6, -1, 0)).Position
+    local hipR = (cf * CFrame.new( 0.6, -1, 0)).Position
+    
+    local headTop = (head.CFrame * CFrame.new(0, 0.5, 0)).Position
+    local headBottom = (head.CFrame * CFrame.new(0, -0.9, 0)).Position
+    local lArmBottom = (lArm.CFrame * CFrame.new(0, -0.9, 0)).Position
+    local rArmBottom = (rArm.CFrame * CFrame.new(0, -0.9, 0)).Position
+    local lLegBottom = (lLeg.CFrame * CFrame.new(0, -1, 0)).Position
+    local rLegBottom = (rLeg.CFrame * CFrame.new(0, -1, 0)).Position
+    
+    return {
+        {headTop, headBottom},
+        {headBottom, topOfTorso},
+        {socketL, socketR},
+        {socketL, lArmBottom},
+        {socketR, rArmBottom},
+        {topOfTorso, bottomOfTorso},
+        {bottomOfTorso, hipL},
+        {bottomOfTorso, hipR},
+        {hipL, lLeg.Position},
+        {hipR, rLeg.Position},
+        {lLeg.Position, lLegBottom},
+        {rLeg.Position, rLegBottom},
+    }
 end
+
 local espData = {}
+
 local function createLine(color)
-	local f = Instance.new("Frame")
-	f.BackgroundColor3 = color
-	f.BorderSizePixel = 0
-	f.AnchorPoint = Vector2.new(0.5, 0.5)
-	f.Visible = false
-	f.ZIndex = 10
-	f.Parent = screenGui
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(1, 0)
-	c.Parent = f
-	return f
+    local f = Instance.new("Frame")
+    f.BackgroundColor3 = color
+    f.BorderSizePixel = 0
+    f.AnchorPoint = Vector2.new(0.5, 0.5)
+    f.Visible = false
+    f.ZIndex = 10
+    f.Parent = screenGui
+    
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(1, 0)
+    c.Parent = f
+    
+    return f
 end
+
 local function updateLineColors(player)
-	local data = espData[player]
-	if not data then return end
-	local col = getTeamColor(player)
-	for _, l in ipairs(data.lines) do
-		if l and l.Parent then l.BackgroundColor3 = col end
-	end
+    local data = espData[player]
+    if not data then return end
+    
+    local col = getTeamColor(player)
+    for _, l in ipairs(data.lines) do
+        if l and l.Parent then
+            l.BackgroundColor3 = col
+        end
+    end
 end
+
 local function cleanupPlayer(player)
-	if espData[player] then
-		for _, l in ipairs(espData[player].lines) do
-			if l and l.Parent then l:Destroy() end
-		end
-		if espData[player].faceLine and espData[player].faceLine.Parent then
-			espData[player].faceLine:Destroy()
-		end
-		espData[player] = nil
-	end
+    if espData[player] then
+        for _, l in ipairs(espData[player].lines) do
+            if l and l.Parent then
+                l:Destroy()
+            end
+        end
+        if espData[player].faceLine and espData[player].faceLine.Parent then
+            espData[player].faceLine:Destroy()
+        end
+        espData[player] = nil
+    end
 end
+
 local function setupCharacter(player, character)
-	cleanupPlayer(player)
-	local faceLine = createLine(FACE_COLOR)
-	espData[player] = {character=character, lines={}, r15=false, faceLine=faceLine, ready=false}
-	task.spawn(function()
-		if not character.Parent then return end
-		local w = 0
-		repeat
-			task.wait(0.1) w += 0.1
-			if killed then return end
-			if not character.Parent then return end
-			if espData[player] and espData[player].character ~= character then return end
-			if character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso") then break end
-		until w >= 5
-		if killed or not character.Parent then return end
-		if not espData[player] or espData[player].character ~= character then return end
-		local r15 = character:FindFirstChild("UpperTorso") ~= nil
-		local needed = r15
-			and {"Head","UpperTorso","LowerTorso","LeftUpperArm","LeftLowerArm","LeftHand","RightUpperArm","RightLowerArm","RightHand","LeftUpperLeg","LeftLowerLeg","LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot"}
-			or {"Head","Torso","Left Arm","Right Arm","Left Leg","Right Leg"}
-		w = 0
-		repeat
-			task.wait(0.1) w += 0.1
-			if killed then return end
-			if not character.Parent then return end
-			if espData[player] and espData[player].character ~= character then return end
-			local ok = true
-			for _, n in ipairs(needed) do if not character:FindFirstChild(n) then ok = false break end end
-			if ok then break end
-		until w >= 5
-		if killed or not character.Parent then return end
-		if not espData[player] or espData[player].character ~= character then return end
-		local col = getTeamColor(player)
-		local count = r15 and #R15_BONES or R6_SEGMENT_COUNT
-		local lines = {}
-		for i = 1, count do lines[i] = createLine(col) end
-		espData[player].lines = lines
-		espData[player].r15 = r15
-		espData[player].ready = true
-	end)
+    cleanupPlayer(player)
+    
+    local faceLine = createLine(FACE_COLOR)
+    espData[player] = {
+        character=character, 
+        lines={}, 
+        r15=false, 
+        faceLine=faceLine, 
+        ready=false
+    }
+    
+    task.spawn(function()
+        if not character.Parent then return end
+        
+        local w = 0
+        repeat
+            task.wait(0.1)
+            w += 0.1
+            if killed then return end
+            if not character.Parent then return end
+            if espData[player] and espData[player].character ~= character then return end
+            if character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso") then
+                break
+            end
+        until w >= 5
+        
+        if killed or not character.Parent then return end
+        if not espData[player] or espData[player].character ~= character then return end
+        
+        local r15 = character:FindFirstChild("UpperTorso") ~= nil
+        local needed = r15 and {
+            "Head","UpperTorso","LowerTorso",
+            "LeftUpperArm","LeftLowerArm","LeftHand",
+            "RightUpperArm","RightLowerArm","RightHand",
+            "LeftUpperLeg","LeftLowerLeg","LeftFoot",
+            "RightUpperLeg","RightLowerLeg","RightFoot"
+        } or {
+            "Head","Torso","Left Arm","Right Arm","Left Leg","Right Leg"
+        }
+        
+        w = 0
+        repeat
+            task.wait(0.1)
+            w += 0.1
+            if killed then return end
+            if not character.Parent then return end
+            if espData[player] and espData[player].character ~= character then return end
+            
+            local ok = true
+            for _, n in ipairs(needed) do
+                if not character:FindFirstChild(n) then
+                    ok = false
+                    break
+                end
+            end
+            if ok then break end
+        until w >= 5
+        
+        if killed or not character.Parent then return end
+        if not espData[player] or espData[player].character ~= character then return end
+        
+        local col = getTeamColor(player)
+        local count = r15 and #R15_BONES or R6_SEGMENT_COUNT
+        local lines = {}
+        for i = 1, count do
+            lines[i] = createLine(col)
+        end
+        
+        espData[player].lines = lines
+        espData[player].r15 = r15
+        espData[player].ready = true
+    end)
 end
+
 local function setupPlayer(player)
-	if player == LocalPlayer then return end
-	player:GetPropertyChangedSignal("Team"):Connect(function() updateLineColors(player) end)
-	player.CharacterAdded:Connect(function(c)
-		cleanupPlayer(player)
-		setupCharacter(player, c)
-	end)
-	if player.Character then setupCharacter(player, player.Character) end
+    if player == LocalPlayer then return end
+    
+    player:GetPropertyChangedSignal("Team"):Connect(function()
+        updateLineColors(player)
+    end)
+    
+    player.CharacterAdded:Connect(function(c)
+        cleanupPlayer(player)
+        setupCharacter(player, c)
+    end)
+    
+    if player.Character then
+        setupCharacter(player, player.Character)
+    end
 end
-for _, p in ipairs(Players:GetPlayers()) do setupPlayer(p) end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    setupPlayer(p)
+end
+
 Players.PlayerAdded:Connect(setupPlayer)
 Players.PlayerRemoving:Connect(cleanupPlayer)
+
 local function hasLOS(target)
-	local char = target.Character
-	if not char then return false end
-	local head = char:FindFirstChild("Head")
-	if not head then return false end
-	local origin = Camera.CFrame.Position
-	local params = RaycastParams.new()
-	params.FilterDescendantsInstances = {LocalPlayer.Character, char}
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	return workspace:Raycast(origin, head.Position - origin, params) == nil
+    local char = target.Character
+    if not char then return false end
+    
+    local head = char:FindFirstChild("Head")
+    if not head then return false end
+    
+    local origin = Camera.CFrame.Position
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {LocalPlayer.Character, char}
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    
+    return workspace:Raycast(origin, head.Position - origin, params) == nil
 end
+
+local function isTeammate(player)
+    -- Fixed team check - handles cases where either player has no team
+    if player.Team and LocalPlayer.Team then
+        return player.Team == LocalPlayer.Team
+    end
+    return false
+end
+
 local function getClosestTarget()
-	local closestPlayer = nil
-	local closestDist = FOV_RADIUS
-
-	local center = Vector2.new(
-		Camera.ViewportSize.X / 2,
-		Camera.ViewportSize.Y / 2
-	)
-
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player == LocalPlayer then continue end
-		if player.Team and player.Team == LocalPlayer.Team then continue end
-
-		local char = player.Character
-		if not char or not char.Parent then continue end
-
-		local humanoid = char:FindFirstChildOfClass("Humanoid")
-		if not humanoid then continue end
-		
-		-- 🔥 Proper dead check
-		if humanoid.Health <= 0 or humanoid:GetState() == Enum.HumanoidStateType.Dead then
-			continue
-		end
-
-		local head = char:FindFirstChild("Head")
-		if not head then continue end
-
-		local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
-		if not onScreen or screenPos.Z <= 0 then continue end
-
-		local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
-
-		if dist < closestDist and hasLOS(player) then
-			closestDist = dist
-			closestPlayer = player
-		end
-	end
-
-	return closestPlayer
+    local closestPlayer = nil
+    local closestDist = FOV_RADIUS
+    local center = Vector2.new(
+        Camera.ViewportSize.X / 2,
+        Camera.ViewportSize.Y / 2
+    )
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if isTeammate(player) then continue end
+        
+        local char = player.Character
+        if not char or not char.Parent then continue end
+        
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not humanoid then continue end
+        
+        if humanoid.Health <= 0 or humanoid:GetState() == Enum.HumanoidStateType.Dead then
+            continue
+        end
+        
+        local head = char:FindFirstChild("Head")
+        if not head then continue end
+        
+        local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+        if not onScreen or screenPos.Z <= 0 then continue end
+        
+        local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+        if dist < closestDist and hasLOS(player) then
+            closestDist = dist
+            closestPlayer = player
+        end
+    end
+    
+    return closestPlayer
 end
+
 local function updateLabel()
-	label.Text = "ESP:"..(espEnabled and "ON" or "OFF").." | AIM:"..(aimlockOn and "ON" or "OFF").." | [T] Toggle [H] Del"
-	label.TextColor3 = espEnabled and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,50,50)
+    label.Text = "ESP:"..(espEnabled and "ON" or "OFF").." | AIM:"..(aimlockOn and "ON" or "OFF").." | [T] Toggle [H] Del"
+    label.TextColor3 = espEnabled and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,50,50)
 end
+
 local function killScript()
-	killed = true
-	aimlockOn = false
-	if savedCF then Camera.CFrame = savedCF savedCF = nil end
-	for _, data in pairs(espData) do
-		for _, l in ipairs(data.lines) do if l and l.Parent then l:Destroy() end end
-		if data.faceLine and data.faceLine.Parent then data.faceLine:Destroy() end
-	end
-	espData = {}
-	screenGui:Destroy()
-	script:Destroy()
+    killed = true
+    aimlockOn = false
+    
+    if savedCF then
+        Camera.CFrame = savedCF
+        savedCF = nil
+    end
+    
+    for _, data in pairs(espData) do
+        for _, l in ipairs(data.lines) do
+            if l and l.Parent then
+                l:Destroy()
+            end
+        end
+        if data.faceLine and data.faceLine.Parent then
+            data.faceLine:Destroy()
+        end
+    end
+    
+    espData = {}
+    screenGui:Destroy()
+    script:Destroy()
 end
-local mb5Down = false
 
+-- Input handling
 UserInputService.InputBegan:Connect(function(input, gp)
-	if killed then return end
-
-	-- H always works
-	if input.KeyCode == Enum.KeyCode.H then
-		killScript()
-		return
-	end
-
-	if gp then return end
-
-	-- ALT = aimlock
-	if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
-		if not espEnabled then return end
-		aimlockOn = not aimlockOn
-		circle.Visible = aimlockOn
-		updateLabel()
-	end
-
-	-- MB5 pressed
-	if input.UserInputType == Enum.UserInputType.MouseButton5 then
-		if mb5Down then return end
-		mb5Down = true
-
-		espEnabled = not espEnabled
-
-		if not espEnabled then
-			aimlockOn = false
-			if savedCF then
-				Camera.CFrame = savedCF
-				savedCF = nil
-			end
-			circle.Visible = false
-		end
-
-		updateLabel()
-	end
+    if killed then return end
+    
+    -- H always works (even when typing)
+    if input.KeyCode == Enum.KeyCode.H then
+        killScript()
+        return
+    end
+    
+    -- Ignore game processed events for other keys (prevents toggling while typing)
+    if gp then return end
+    
+    -- T = Toggle ESP (FIXED - was missing!)
+    if input.KeyCode == Enum.KeyCode.T then
+        espEnabled = not espEnabled
+        
+        -- Turn off aimlock when ESP is disabled
+        if not espEnabled and aimlockOn then
+            aimlockOn = false
+            if savedCF then
+                Camera.CFrame = savedCF
+                savedCF = nil
+            end
+            circle.Visible = false
+        end
+        
+        updateLabel()
+        return
+    end
+    
+    -- ALT = Toggle Aimlock (FIXED - now saves camera properly)
+    if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
+        aimlockOn = not aimlockOn
+        
+        if aimlockOn then
+            -- Save camera position when enabling aimlock
+            savedCF = Camera.CFrame
+            circle.Visible = true
+        else
+            -- Restore camera when disabling aimlock
+            if savedCF then
+                Camera.CFrame = savedCF
+                savedCF = nil
+            end
+            circle.Visible = false
+        end
+        
+        updateLabel()
+        return
+    end
 end)
 
-UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton5 then
-		mb5Down = false
-	end
-end)
 RunService.RenderStepped:Connect(function()
-	if killed then return end
-	if aimlockOn and espEnabled then
-		local target = getClosestTarget()
-		if target then
-			local char = target.Character
-			local head = char and char:FindFirstChild("Head")
-			if head then
-				local currentCF = Camera.CFrame
-				Camera.CFrame = currentCF:Lerp(CFrame.new(currentCF.Position, head.Position), SMOOTHNESS)
-			end
-		end
-	end
-	for player, data in pairs(espData) do
-		local char = data.character
-		if not char or not char.Parent or char ~= player.Character then
-			for _, l in ipairs(data.lines) do if l and l.Parent then l.Visible = false end end
-			if data.faceLine and data.faceLine.Parent then data.faceLine.Visible = false end
-			continue
-		end
-		local head = char:FindFirstChild("Head")
-		if head and data.faceLine then
-			if not espEnabled then data.faceLine.Visible = false
-			else drawLinePts(head.Position, (head.CFrame * CFrame.new(0, 0, -3.5)).Position, data.faceLine) end
-		end
-		if not espEnabled or not data.ready then
-			for _, l in ipairs(data.lines) do if l and l.Parent then l.Visible = false end end
-			continue
-		end
-		if data.r15 then
-			for i, pair in ipairs(R15_BONES) do
-				local line = data.lines[i]
-				if not line or not line.Parent then continue end
-				local pA = char:FindFirstChild(pair[1])
-				local pB = char:FindFirstChild(pair[2])
-				if not pA or not pB then line.Visible = false continue end
-				local posA = pA.Position
-				local posB = pB.Position
-				if pair[1] == "Head" and pair[2] == "UpperTorso" then
-					posA = (pA.CFrame * CFrame.new(0, 0.5, 0)).Position
-				end
-				if pair[1] == "UpperTorso" and (pair[2] == "LeftUpperArm" or pair[2] == "RightUpperArm") then
-					posA = (pA.CFrame * CFrame.new(0, 0.7, 0)).Position
-				end
-				drawLinePts(posA, posB, line)
-			end
-		else
-			local segs = getR6Segments(char)
-			for i = 1, #data.lines do
-				local line = data.lines[i]
-				if not line or not line.Parent then continue end
-				local seg = segs[i]
-				if not seg then line.Visible = false continue end
-				drawLinePts(seg[1], seg[2], line)
-			end
-		end
-	end
+    if killed then return end
+    
+    -- FIXED: Aimlock now works independently of ESP
+    if aimlockOn then
+        local target = getClosestTarget()
+        if target then
+            local char = target.Character
+            local head = char and char:FindFirstChild("Head")
+            if head then
+                local currentCF = Camera.CFrame
+                Camera.CFrame = currentCF:Lerp(CFrame.new(currentCF.Position, head.Position), SMOOTHNESS)
+            end
+        end
+    end
+    
+    -- ESP Rendering
+    for player, data in pairs(espData) do
+        local char = data.character
+        
+        -- Check if character is still valid
+        if not char or not char.Parent or char ~= player.Character then
+            for _, l in ipairs(data.lines) do
+                if l and l.Parent then
+                    l.Visible = false
+                end
+            end
+            if data.faceLine and data.faceLine.Parent then
+                data.faceLine.Visible = false
+            end
+            continue
+        end
+        
+        -- Face line (direction indicator)
+        local head = char:FindFirstChild("Head")
+        if head and data.faceLine then
+            if not espEnabled then
+                data.faceLine.Visible = false
+            else
+                drawLinePts(head.Position, (head.CFrame * CFrame.new(0, 0, -3.5)).Position, data.faceLine)
+            end
+        end
+        
+        -- Skeleton ESP
+        if not espEnabled or not data.ready then
+            for _, l in ipairs(data.lines) do
+                if l and l.Parent then
+                    l.Visible = false
+                end
+            end
+            continue
+        end
+        
+        if data.r15 then
+            for i, pair in ipairs(R15_BONES) do
+                local line = data.lines[i]
+                if not line or not line.Parent then continue end
+                
+                local pA = char:FindFirstChild(pair[1])
+                local pB = char:FindFirstChild(pair[2])
+                
+                if not pA or not pB then
+                    line.Visible = false
+                    continue
+                end
+                
+                local posA = pA.Position
+                local posB = pB.Position
+                
+                if pair[1] == "Head" and pair[2] == "UpperTorso" then
+                    posA = (pA.CFrame * CFrame.new(0, 0.5, 0)).Position
+                end
+                if pair[1] == "UpperTorso" and (pair[2] == "LeftUpperArm" or pair[2] == "RightUpperArm") then
+                    posA = (pA.CFrame * CFrame.new(0, 0.7, 0)).Position
+                end
+                
+                drawLinePts(posA, posB, line)
+            end
+        else
+            local segs = getR6Segments(char)
+            for i = 1, #data.lines do
+                local line = data.lines[i]
+                if not line or not line.Parent then continue end
+                
+                local seg = segs[i]
+                if not seg then
+                    line.Visible = false
+                    continue
+                end
+                
+                drawLinePts(seg[1], seg[2], line)
+            end
+        end
+    end
 end)
