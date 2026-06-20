@@ -6,13 +6,17 @@ local Camera = workspace.CurrentCamera
 
 local ESP_COLOR_DEFAULT = Color3.fromRGB(0, 120, 255)
 local FACE_COLOR = Color3.fromRGB(0, 255, 0)
-local SMOOTHNESS = 3
+local SMOOTHNESS = 0.08 -- Much lower for smooth interpolation (0.05-0.15 is good)
 local FOV_RADIUS = 75
 
 local aimlockOn = false
 local espEnabled = true
 local savedCF = nil
 local killed = false
+
+-- For smooth aimlock
+local currentAimTarget = nil
+local lastAimCF = nil
 
 local MIN_THICKNESS = 1
 local MAX_THICKNESS = 4
@@ -310,7 +314,6 @@ local function hasLOS(target)
 end
 
 local function isTeammate(player)
-    -- Fixed team check - handles cases where either player has no team
     if player.Team and LocalPlayer.Team then
         return player.Team == LocalPlayer.Team
     end
@@ -363,11 +366,11 @@ end
 local function killScript()
     killed = true
     aimlockOn = false
+    currentAimTarget = nil
+    lastAimCF = nil
     
-    if savedCF then
-        Camera.CFrame = savedCF
-        savedCF = nil
-    end
+    -- Don't reset camera - just clear the saved position
+    savedCF = nil
     
     for _, data in pairs(espData) do
         for _, l in ipairs(data.lines) do
@@ -389,26 +392,22 @@ end
 UserInputService.InputBegan:Connect(function(input, gp)
     if killed then return end
     
-    -- H always works (even when typing)
     if input.KeyCode == Enum.KeyCode.H then
         killScript()
         return
     end
     
-    -- Ignore game processed events for other keys (prevents toggling while typing)
     if gp then return end
     
-    -- T = Toggle ESP (FIXED - was missing!)
     if input.KeyCode == Enum.KeyCode.T then
         espEnabled = not espEnabled
         
-        -- Turn off aimlock when ESP is disabled
         if not espEnabled and aimlockOn then
             aimlockOn = false
-            if savedCF then
-                Camera.CFrame = savedCF
-                savedCF = nil
-            end
+            currentAimTarget = nil
+            lastAimCF = nil
+            -- Don't reset camera position!
+            savedCF = nil
             circle.Visible = false
         end
         
@@ -416,15 +415,21 @@ UserInputService.InputBegan:Connect(function(input, gp)
         return
     end
     
-    -- ALT = Toggle Aimlock (FIXED - now saves camera properly)
     if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
         aimlockOn = not aimlockOn
         
         if aimlockOn then
-            -- Save camera position when enabling aimlock
             savedCF = Camera.CFrame
+            lastAimCF = Camera.CFrame
             circle.Visible = true
         else
+            -- Disable without resetting camera - just clear saved position
+            currentAimTarget = nil
+            lastAimCF = nil
+            savedCF = nil
+            circle.Visible = false
+        end
+        
         updateLabel()
         return
     end
@@ -433,15 +438,19 @@ end)
 RunService.RenderStepped:Connect(function()
     if killed then return end
     
-    -- FIXED: Aimlock now works independently of ESP
     if aimlockOn then
         local target = getClosestTarget()
         if target then
             local char = target.Character
             local head = char and char:FindFirstChild("Head")
             if head then
-                local currentCF = Camera.CFrame
-                Camera.CFrame = currentCF:Lerp(CFrame.new(currentCF.Position, head.Position), SMOOTHNESS)
+                local targetPos = head.Position
+                local targetCF = CFrame.new(Camera.CFrame.Position, targetPos)
+                
+                -- Smooth interpolation using small alpha value
+                -- This creates gradual movement instead of snapping
+                local smoothedCF = Camera.CFrame:Lerp(targetCF, SMOOTHNESS)
+                Camera.CFrame = smoothedCF
             end
         end
     end
@@ -450,7 +459,6 @@ RunService.RenderStepped:Connect(function()
     for player, data in pairs(espData) do
         local char = data.character
         
-        -- Check if character is still valid
         if not char or not char.Parent or char ~= player.Character then
             for _, l in ipairs(data.lines) do
                 if l and l.Parent then
@@ -463,7 +471,6 @@ RunService.RenderStepped:Connect(function()
             continue
         end
         
-        -- Face line (direction indicator)
         local head = char:FindFirstChild("Head")
         if head and data.faceLine then
             if not espEnabled then
@@ -473,7 +480,6 @@ RunService.RenderStepped:Connect(function()
             end
         end
         
-        -- Skeleton ESP
         if not espEnabled or not data.ready then
             for _, l in ipairs(data.lines) do
                 if l and l.Parent then
@@ -525,3 +531,5 @@ RunService.RenderStepped:Connect(function()
         end
     end
 end)
+
+updateLabel()
